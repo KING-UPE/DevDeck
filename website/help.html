@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Documentation | DevDeck</title>
+    <meta name="description" content="Official documentation for DevDeck. Learn how to manage your workspaces, run scripts, and kill ghost processes." />
+    <meta name="keywords" content="DevDeck documentation, help, support, tutorial, process manager tutorial, DevDeck guide" />
+    <meta name="author" content="Upendra Dasanayaka" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://king-upe.github.io/DevDeck/help.html" />
+    <meta property="og:title" content="Documentation | DevDeck" />
+    <meta property="og:description" content="Official documentation for DevDeck. Learn how to manage your workspaces, run scripts, and kill ghost processes." />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://king-upe.github.io/DevDeck/help.html" />
+    <meta property="twitter:title" content="Documentation | DevDeck" />
+    <meta property="twitter:description" content="Official documentation for DevDeck. Learn how to manage your workspaces, run scripts, and kill ghost processes." />
+    <link rel="stylesheet" href="./style.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div class="ambient-ball"></div>
+    <!-- Header -->
+    <header>
+      <div class="container">
+        <nav class="nav-container glass">
+          <a href="/" class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            DevDeck
+          </a>
+          <div class="nav-links">
+            <a href="/">Home</a>
+            <a href="/download.html">Download</a>
+            <a href="/help.html" class="active">Documentation</a>
+            <a href="/about.html">About Developer</a>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main style="flex: 1;">
+      <section class="section" style="padding-top: 8rem;">
+        <div class="container" style="max-width: 900px;">
+          <h1 class="text-gradient" style="margin-bottom: 1rem;">Official Documentation</h1>
+          <p style="font-size: 1.1rem; margin-bottom: 3rem;">A comprehensive guide to installing, configuring, and mastering DevDeck.</p>
+          
+          <div class="glass-card" style="margin-bottom: 2.5rem; border-color: var(--border-highlight);">
+            <h2 class="text-accent" style="font-size: 1.75rem; display: flex; align-items: center; gap: 0.5rem;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+              1. Getting Started
+            </h2>
+            <p>DevDeck is designed to stay completely out of your way until you need it. When you first launch the app, you will be greeted by the <strong>Interactive Tour</strong>.</p>
+            <p>We highly recommend taking the 5-step tour to familiarize yourself with the interface. Once the tour finishes, click the <strong>Auto-Detect</strong> button. DevDeck will automatically scan all your drives (A: to Z:) to find your Node.js, Rust, and Python projects and organize them for you.</p>
+          </div>
+
+          <div class="glass-card" style="margin-bottom: 2.5rem;">
+            <h2 class="text-accent" style="font-size: 1.75rem; display: flex; align-items: center; gap: 0.5rem;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+              2. Managing Workspaces & Projects
+            </h2>
+            <p>A <strong>Workspace</strong> is simply a parent folder on your hard drive that contains your projects. For example, if you keep all your code in <code>C:\Users\John\Documents\GitHub</code>, that directory is your workspace.</p>
+            <ul style="color: var(--text-secondary); margin-left: 1.5rem; margin-bottom: 1rem; line-height: 1.8;">
+              <li><strong>Navigating:</strong> Select a workspace on the left sidebar to view its child projects.</li>
+              <li><strong>Filtering & Searching:</strong> Use the search bar at the bottom to quickly find a project by name, or filter by framework (React, Next.js, Rust, Vue, etc.) using the dropdown menu.</li>
+              <li><strong>Hiding Projects:</strong> Right-click or use the UI to hide projects you don't care about (e.g. old deprecated repositories). You can unhide them via the "Hidden Projects" toggle at the bottom.</li>
+            </ul>
+          </div>
+
+          <div class="glass-card" style="margin-bottom: 2.5rem;">
+            <h2 class="text-accent" style="font-size: 1.75rem; display: flex; align-items: center; gap: 0.5rem;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+              3. The Script Runner
+            </h2>
+            <p>When you click on a project, DevDeck parses your <code>package.json</code> or <code>Cargo.toml</code> and lists all available scripts.</p>
+            <p>Click the <strong>Run</strong> button next to any script (like <code>npm run dev</code> or <code>cargo build</code>) to execute it. The built-in terminal will pop up, streaming the live output seamlessly into the UI. You can run multiple scripts across multiple projects simultaneously, and DevDeck manages the terminals in the background.</p>
+          </div>
+
+          <div class="glass-card" style="margin-bottom: 2.5rem;">
+            <h2 class="text-accent" style="font-size: 1.75rem; display: flex; align-items: center; gap: 0.5rem;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              4. Process Manager
+            </h2>
+            <p>Ever tried to run a server and got an <code>EADDRINUSE</code> error because port 3000 is already taken? The Process Manager solves this.</p>
+            <p>Click <strong>Process Manager</strong> on the bottom left. It automatically queries your OS for any active Node, Rust, or Python servers running in the background. You can instantly kill them with one click, reclaiming your ports and keeping your system clean.</p>
+          </div>
+
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer style="padding: 1.5rem 0; border: none; background: transparent;">
+      <div class="container" style="display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.85rem; flex-wrap: wrap; gap: 1rem;">
+        <div>&copy; DevDeck. Open Source Software (MIT).</div>
+        <div>
+          Designed & Developed by <a href="https://upendradasanayaka.vercel.app/" target="_blank" rel="noopener noreferrer" style="color: var(--text-primary); text-decoration: none; font-weight: 500; transition: color 0.2s;">Upendra Dasanayaka</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
