@@ -57,24 +57,37 @@
           <div class="grid grid-3" style="max-width: 1000px; margin: 0 auto;">
             <!-- Windows -->
             <div class="glass-card" style="display: flex; flex-direction: column; align-items: center; border-color: var(--border-highlight);">
-              <svg width="48" height="48" viewBox="0 0 448 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z"/></svg>
+              <svg height="48" viewBox="0 0 448 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z"/></svg>
               <h3>Windows</h3>
               <p>Windows 10 and 11</p>
-              <a href="#" id="btn-win" class="btn btn-primary" style="margin-top: auto; width: 100%;">Download .exe</a>
+              <div style="margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="#" id="btn-win" class="btn btn-primary" style="width: 100%;">Download .exe</a>
+                <a href="#" id="btn-win-msi" class="btn btn-outline glass" style="width: 100%; font-size: 0.85rem; padding: 0.4rem;">Download .msi</a>
+              </div>
             </div>
 
             <!-- macOS -->
             <div class="glass-card" style="display: flex; flex-direction: column; align-items: center;">
-              <svg width="48" height="48" viewBox="0 0 384 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+              <svg height="48" viewBox="0 0 384 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
               <h3>macOS</h3>
               <p>Intel & Apple Silicon</p>
-              <a href="#" id="btn-mac" class="btn btn-outline glass" style="margin-top: auto; width: 100%;">Loading...</a>
+              <div style="margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="#" id="btn-mac" class="btn btn-outline glass" style="width: 100%;">Loading...</a>
+              </div>
             </div>
 
             <!-- Linux -->
             <div class="glass-card" style="display: flex; flex-direction: column; align-items: center;">
-              <svg width="48" height="48" viewBox="0 0 448 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M220.8 123.3c1 .5 1.8 1.7 3 1.7 1.1 0 2.8-.4 2.9-1.5.2-1.4-1.9-2.3-3.2-2.9-1.7-.7-3.9-1-5.5-.1-.4.2-.8.7-.6 1.1.3 1.3 2.3 1.1 3.4 1.7zm-21.9 1.7c1.2 0 2-1.2 3-1.7 1.1-.6 3.1-.4 3.5-1.7.2-.4-.2-.9-.6-1.1-1.6-.9-3.8-.6-5.5.1-1.3.6-3.4 1.5-3.2 2.9.1 1.1 1.8 1.5 2.8 1.5zm70.4 28.5c2.3 0 4.1-1.9 4.1-4.3s-1.8-4.3-4.1-4.3-4.1 1.9-4.1 4.3 1.8 4.3 4.1 4.3zm-101.4-8.6c-2.3 0-4.1 1.9-4.1 4.3s1.8 4.3 4.1 4.3 4.1-1.9 4.1-4.3-1.8-4.3-4.1-4.3zm194.2 138.8c0-82-41-140-101.4-140h-8.9c-2.8-59.5-27-90.4-53.5-90.4-26.6 0-51 31-53.5 90.4h-9c-60.4 0-101.4 58-101.4 140 0 83.2 39.5 163.6 131.7 197.6-9.1-19.1-7.2-46.7 8.3-64.8-19.1 13.9-39.7 18.6-43.5 11.5-1.4-2.6 1.7-8 7.3-13.6 15.6-15.6 42.1-23.7 67.2-24.6 25.1.8 51.6 9 67.2 24.6 5.6 5.6 8.7 11 7.3 13.6-3.8 7.2-24.4 2.4-43.5-11.5 15.5 18 17.4 45.7 8.3 64.8 92.1-34.1 131.6-114.5 131.6-197.6z"/></svg>
-              <h3>Linux</h3>`n              <p>.deb and .AppImage</p>`n              <a href="#" id="btn-lin" class="btn btn-outline glass" style="margin-top: auto; width: 100%;">Loading...</a>
+              <svg height="48" viewBox="0 0 448 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M220.8 123.3c1 .5 1.8 1.7 3 1.7 1.1 0 2.8-.4 2.9-1.5.2-1.4-1.9-2.3-3.2-2.9-1.7-.7-3.9-1-5.5-.1-.4.2-.8.7-.6 1.1.3 1.3 2.3 1.1 3.4 1.7zm-21.9 1.7c1.2 0 2-1.2 3-1.7 1.1-.6 3.1-.4 3.5-1.7.2-.4-.2-.9-.6-1.1-1.6-.9-3.8-.6-5.5.1-1.3.6-3.4 1.5-3.2 2.9.1 1.1 1.8 1.5 2.8 1.5zm70.4 28.5c2.3 0 4.1-1.9 4.1-4.3s-1.8-4.3-4.1-4.3-4.1 1.9-4.1 4.3 1.8 4.3 4.1 4.3zm-101.4-8.6c-2.3 0-4.1 1.9-4.1 4.3s1.8 4.3 4.1 4.3 4.1-1.9 4.1-4.3-1.8-4.3-4.1-4.3zm194.2 138.8c0-82-41-140-101.4-140h-8.9c-2.8-59.5-27-90.4-53.5-90.4-26.6 0-51 31-53.5 90.4h-9c-60.4 0-101.4 58-101.4 140 0 83.2 39.5 163.6 131.7 197.6-9.1-19.1-7.2-46.7 8.3-64.8-19.1 13.9-39.7 18.6-43.5 11.5-1.4-2.6 1.7-8 7.3-13.6 15.6-15.6 42.1-23.7 67.2-24.6 25.1.8 51.6 9 67.2 24.6 5.6 5.6 8.7 11 7.3 13.6-3.8 7.2-24.4 2.4-43.5-11.5 15.5 18 17.4 45.7 8.3 64.8 92.1-34.1 131.6-114.5 131.6-197.6z"/></svg>
+              <h3>Linux</h3>
+              <p>.deb, .AppImage, .rpm</p>
+              <div style="margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="#" id="btn-lin" class="btn btn-outline glass" style="width: 100%;">Loading...</a>
+                <div style="display: flex; gap: 0.5rem;">
+                  <a href="#" id="btn-lin-deb" class="btn btn-outline glass" style="width: 100%; font-size: 0.85rem; padding: 0.4rem; display: none;">.deb</a>
+                  <a href="#" id="btn-lin-rpm" class="btn btn-outline glass" style="width: 100%; font-size: 0.85rem; padding: 0.4rem; display: none;">.rpm</a>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -98,42 +111,41 @@
       const data = await response.json();
       const assets = data.assets;
       
-      const btnWin = document.getElementById('btn-win');
-      const btnMac = document.getElementById('btn-mac');
-      const btnLin = document.getElementById('btn-lin');
-
-      let winUrl = '', macUrl = '', linUrl = '';
+      let winUrl = '', winMsiUrl = '', macUrl = '', linUrl = '', linDebUrl = '', linRpmUrl = '';
       
       for (const asset of assets) {
-        if (asset.name.endsWith('setup.exe')) {
-          winUrl = asset.browser_download_url;
-        } else if (asset.name.endsWith('.dmg')) {
-          macUrl = asset.browser_download_url;
-        } else if (asset.name.endsWith('.AppImage')) {
-          linUrl = asset.browser_download_url;
-        }
+        if (asset.name.endsWith('.exe')) winUrl = asset.browser_download_url;
+        else if (asset.name.endsWith('.msi')) winMsiUrl = asset.browser_download_url;
+        else if (asset.name.endsWith('.dmg')) macUrl = asset.browser_download_url;
+        else if (asset.name.endsWith('.AppImage')) linUrl = asset.browser_download_url;
+        else if (asset.name.endsWith('.deb')) linDebUrl = asset.browser_download_url;
+        else if (asset.name.endsWith('.rpm')) linRpmUrl = asset.browser_download_url;
       }
 
-      if (winUrl && btnWin) {
-        btnWin.href = winUrl;
-        btnWin.textContent = 'Download .exe';
-      }
-      if (macUrl && btnMac) {
-        btnMac.href = macUrl;
-        btnMac.textContent = 'Download .dmg';
-        btnMac.className = 'btn btn-primary';
-      }
-      if (linUrl && btnLin) {
-        btnLin.href = linUrl;
-        btnLin.textContent = 'Download .AppImage';
-        btnLin.className = 'btn btn-primary';
-      }
+      // Windows
+      const btnWin = document.getElementById('btn-win');
+      const btnWinMsi = document.getElementById('btn-win-msi');
+      if (winUrl && btnWin) { btnWin.href = winUrl; btnWin.textContent = 'Download .exe'; }
+      if (winMsiUrl && btnWinMsi) { btnWinMsi.href = winMsiUrl; btnWinMsi.textContent = 'Download .msi'; }
+      else if (btnWinMsi) { btnWinMsi.style.display = 'none'; }
+
+      // macOS
+      const btnMac = document.getElementById('btn-mac');
+      if (macUrl && btnMac) { btnMac.href = macUrl; btnMac.textContent = 'Download .dmg'; btnMac.className = 'btn btn-primary'; }
+
+      // Linux
+      const btnLin = document.getElementById('btn-lin');
+      const btnLinDeb = document.getElementById('btn-lin-deb');
+      const btnLinRpm = document.getElementById('btn-lin-rpm');
+      if (linUrl && btnLin) { btnLin.href = linUrl; btnLin.textContent = 'Download .AppImage'; btnLin.className = 'btn btn-primary'; }
+      if (linDebUrl && btnLinDeb) { btnLinDeb.href = linDebUrl; btnLinDeb.style.display = 'block'; }
+      if (linRpmUrl && btnLinRpm) { btnLinRpm.href = linRpmUrl; btnLinRpm.style.display = 'block'; }
     } catch (error) {
       console.error('Error fetching releases:', error);
     }
   }
   fetchLatestReleases();
-</script>
+  </script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     const hamburger = document.querySelector('.hamburger');
