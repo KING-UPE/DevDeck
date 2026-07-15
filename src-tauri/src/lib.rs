@@ -1,5 +1,4 @@
 use std::process::{Command, Stdio};
-use std::os::windows::process::CommandExt;
 use std::io::{BufRead, BufReader};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,8 +7,24 @@ use std::thread;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, AppHandle, State, Manager};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+trait CommandExtCrossPlatform {
+    fn apply_cross_platform_flags(&mut self) -> &mut Self;
+}
+
+impl CommandExtCrossPlatform for std::process::Command {
+    fn apply_cross_platform_flags(&mut self) -> &mut Self {
+        #[cfg(target_os = "windows")]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            self.creation_flags(CREATE_NO_WINDOW);
+        }
+        self
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ProjectInfo {
@@ -233,7 +248,7 @@ fn get_node_processes() -> Result<Vec<NodeProcess>, String> {
     "#;
     let output = Command::new("powershell")
         .args(["-NoProfile", "-Command", script])
-        .creation_flags(CREATE_NO_WINDOW)
+        .apply_cross_platform_flags()
         .output()
         .map_err(|e| e.to_string())?;
         
@@ -294,7 +309,7 @@ fn get_node_processes() -> Result<Vec<NodeProcess>, String> {
 fn kill_process(pid: u32) -> Result<String, String> {
     let output = Command::new("C:\\Windows\\System32\\taskkill.exe")
         .args(["/PID", &pid.to_string(), "/F", "/T"])
-        .creation_flags(CREATE_NO_WINDOW)
+        .apply_cross_platform_flags()
         .output()
         .map_err(|e| e.to_string())?;
         
@@ -320,7 +335,7 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
     let mut child = Command::new("cmd")
         .args(["/C", &command_str])
         .current_dir(&project_path)
-        .creation_flags(CREATE_NO_WINDOW)
+        .apply_cross_platform_flags()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -392,7 +407,7 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
     let mut child = Command::new("cmd")
         .args(["/C", &script_cmd])
         .current_dir(&project_path)
-        .creation_flags(CREATE_NO_WINDOW)
+        .apply_cross_platform_flags()
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -461,7 +476,7 @@ fn stop_script(app: AppHandle, state: State<AppState>, process_key: String) {
         let pid = child.id();
         let _ = Command::new("C:\\Windows\\System32\\taskkill.exe")
             .args(["/PID", &pid.to_string(), "/F", "/T"])
-            .creation_flags(CREATE_NO_WINDOW)
+            .apply_cross_platform_flags()
             .output();
     }
     update_tray_menu(&app);
@@ -513,7 +528,7 @@ pub fn run() {
                                 let pid = child.id();
                                 let _ = std::process::Command::new("C:\\Windows\\System32\\taskkill.exe")
                                     .args(["/PID", &pid.to_string(), "/F", "/T"])
-                                    .creation_flags(CREATE_NO_WINDOW)
+                                    .apply_cross_platform_flags()
                                     .output();
                             }
                             processes.clear();
@@ -526,7 +541,7 @@ pub fn run() {
                                 let pid = child.id();
                                 let _ = std::process::Command::new("C:\\Windows\\System32\\taskkill.exe")
                                     .args(["/PID", &pid.to_string(), "/F", "/T"])
-                                    .creation_flags(CREATE_NO_WINDOW)
+                                    .apply_cross_platform_flags()
                                     .output();
                             }
                             std::process::exit(0);
@@ -539,7 +554,7 @@ pub fn run() {
                                     let pid = child.id();
                                     let _ = std::process::Command::new("C:\\Windows\\System32\\taskkill.exe")
                                         .args(["/PID", &pid.to_string(), "/F", "/T"])
-                                        .creation_flags(CREATE_NO_WINDOW)
+                                        .apply_cross_platform_flags()
                                         .output();
                                 }
                                 update_tray_menu(app);
