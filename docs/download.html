@@ -54,38 +54,45 @@
             Available for all major operating systems.
           </p>
 
-          <div class="grid grid-3" style="max-width: 1000px; margin: 0 auto;">
+          <div class="grid grid-3" style="max-width: 1000px; margin: 0 auto; align-items: stretch;">
             <!-- Windows -->
-            <div class="glass-card" style="display: flex; flex-direction: column; align-items: center; border-color: var(--border-highlight);">
-              <svg height="48" viewBox="0 0 448 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z"/></svg>
-              <h3>Windows</h3>
-              <p>Windows 10 and 11</p>
-              <div style="margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
-                <a href="#" id="btn-win" class="btn btn-primary" style="width: 100%;">Download .exe</a>
-                <a href="#" id="btn-win-msi" class="btn btn-outline glass" style="width: 100%; font-size: 0.85rem; padding: 0.4rem;">Download .msi</a>
+            <div class="glass-card" style="display: flex; flex-direction: column; align-items: center; border-color: var(--border-highlight); height: 100%;">
+              <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 1.5rem;">
+                <svg height="48" viewBox="0 0 448 512" fill="currentColor"><path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z"/></svg>
+              </div>
+              <h3 style="margin-bottom: 0.25rem;">Windows</h3>
+              <p style="margin-bottom: 0; color: var(--text-muted);">Windows 10 and 11</p>
+              <div style="margin-top: auto; padding-top: 2rem; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="#" id="btn-win" class="btn btn-primary" style="width: 100%; text-align: center;">Download .exe</a>
+                <a href="#" id="btn-win-msi" class="btn btn-outline glass" style="width: 100%; text-align: center; font-size: 0.85rem; padding: 0.5rem;">Download .msi</a>
               </div>
             </div>
 
             <!-- macOS -->
-            <div class="glass-card" style="display: flex; flex-direction: column; align-items: center;">
-              <svg height="48" viewBox="0 0 384 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
-              <h3>macOS</h3>
-              <p>Intel & Apple Silicon</p>
-              <div style="margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
-                <a href="#" id="btn-mac" class="btn btn-outline glass" style="width: 100%;">Loading...</a>
+            <div class="glass-card" style="display: flex; flex-direction: column; align-items: center; height: 100%;">
+              <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 1.5rem;">
+                <svg height="48" viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+              </div>
+              <h3 style="margin-bottom: 0.25rem;">macOS</h3>
+              <p style="margin-bottom: 0; color: var(--text-muted);">Intel & Apple Silicon</p>
+              <div style="margin-top: auto; padding-top: 2rem; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="#" id="btn-mac" class="btn btn-outline glass" style="width: 100%; text-align: center;">Loading...</a>
+                <div style="height: 33px; visibility: hidden;"></div>
               </div>
             </div>
 
             <!-- Linux -->
-            <div class="glass-card" style="display: flex; flex-direction: column; align-items: center;">
-              <svg height="48" viewBox="0 0 448 512" fill="currentColor" style="margin-bottom: 1rem;"><path d="M220.8 123.3c1 .5 1.8 1.7 3 1.7 1.1 0 2.8-.4 2.9-1.5.2-1.4-1.9-2.3-3.2-2.9-1.7-.7-3.9-1-5.5-.1-.4.2-.8.7-.6 1.1.3 1.3 2.3 1.1 3.4 1.7zm-21.9 1.7c1.2 0 2-1.2 3-1.7 1.1-.6 3.1-.4 3.5-1.7.2-.4-.2-.9-.6-1.1-1.6-.9-3.8-.6-5.5.1-1.3.6-3.4 1.5-3.2 2.9.1 1.1 1.8 1.5 2.8 1.5zm70.4 28.5c2.3 0 4.1-1.9 4.1-4.3s-1.8-4.3-4.1-4.3-4.1 1.9-4.1 4.3 1.8 4.3 4.1 4.3zm-101.4-8.6c-2.3 0-4.1 1.9-4.1 4.3s1.8 4.3 4.1 4.3 4.1-1.9 4.1-4.3-1.8-4.3-4.1-4.3zm194.2 138.8c0-82-41-140-101.4-140h-8.9c-2.8-59.5-27-90.4-53.5-90.4-26.6 0-51 31-53.5 90.4h-9c-60.4 0-101.4 58-101.4 140 0 83.2 39.5 163.6 131.7 197.6-9.1-19.1-7.2-46.7 8.3-64.8-19.1 13.9-39.7 18.6-43.5 11.5-1.4-2.6 1.7-8 7.3-13.6 15.6-15.6 42.1-23.7 67.2-24.6 25.1.8 51.6 9 67.2 24.6 5.6 5.6 8.7 11 7.3 13.6-3.8 7.2-24.4 2.4-43.5-11.5 15.5 18 17.4 45.7 8.3 64.8 92.1-34.1 131.6-114.5 131.6-197.6z"/></svg>
-              <h3>Linux</h3>
-              <p>.deb, .AppImage, .rpm</p>
-              <div style="margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
-                <a href="#" id="btn-lin" class="btn btn-outline glass" style="width: 100%;">Loading...</a>
-                <div style="display: flex; gap: 0.5rem;">
-                  <a href="#" id="btn-lin-deb" class="btn btn-outline glass" style="width: 100%; font-size: 0.85rem; padding: 0.4rem; display: none;">.deb</a>
-                  <a href="#" id="btn-lin-rpm" class="btn btn-outline glass" style="width: 100%; font-size: 0.85rem; padding: 0.4rem; display: none;">.rpm</a>
+            <div class="glass-card" style="display: flex; flex-direction: column; align-items: center; height: 100%;">
+              <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 1.5rem;">
+                <svg height="48" viewBox="0 0 640 512" fill="currentColor"><path d="M504 368c-13.3 0-24 10.7-24 24v16H160v-16c0-13.3-10.7-24-24-24S112 378.7 112 392v40c0 13.3 10.7 24 24 24h368c13.3 0 24-10.7 24-24v-40c0-13.3-10.7-24-24-24zM32.8 108.8L121.5 256 32.8 403.2c-7.3 12.1-3.4 27.8 8.8 35 12.1 7.3 27.8 3.4 35-8.8l105.4-175.7c4.7-7.8 4.7-17.7 0-25.5L76.5 52.6c-7.3-12.1-22.9-16.1-35-8.8-12.2 7.3-16.1 22.9-8.7 35z"/></svg>
+              </div>
+              <h3 style="margin-bottom: 0.25rem;">Linux</h3>
+              <p style="margin-bottom: 0; color: var(--text-muted);">.deb, .AppImage, .rpm</p>
+              <div style="margin-top: auto; padding-top: 2rem; width: 100%; display: flex; flex-direction: column; gap: 0.5rem;">
+                <a href="#" id="btn-lin" class="btn btn-outline glass" style="width: 100%; text-align: center;">Loading...</a>
+                <div style="display: flex; gap: 0.5rem; width: 100%;">
+                  <a href="#" id="btn-lin-deb" class="btn btn-outline glass" style="flex: 1; text-align: center; font-size: 0.85rem; padding: 0.5rem; display: none;">.deb</a>
+                  <a href="#" id="btn-lin-rpm" class="btn btn-outline glass" style="flex: 1; text-align: center; font-size: 0.85rem; padding: 0.5rem; display: none;">.rpm</a>
                 </div>
               </div>
             </div>
