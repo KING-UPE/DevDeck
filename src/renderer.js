@@ -15,6 +15,7 @@ function isPathInArray(arr, path) {
 let workspaces = JSON.parse(localStorage.getItem('workspaces') || '[]');
 let allProjects = [];
 let hiddenProjects = JSON.parse(localStorage.getItem('hiddenProjects') || '[]');
+let knownProjects = JSON.parse(localStorage.getItem('knownProjects') || '[]');
 let customProjectNames = JSON.parse(localStorage.getItem('customProjectNames') || '{}');
 let pinnedProjects = JSON.parse(localStorage.getItem('pinnedProjects') || '[]');
 let showHidden = false;
@@ -246,11 +247,16 @@ confirmDeleteWorkspaceBtn.addEventListener('click', () => {
     if (workspaceToDelete) {
         workspaces = workspaces.filter(w => (w.path || w) !== workspaceToDelete);
         
-        // We intentionally don't wipe knownProjects here so if it's covered by a parent workspace,
-        // it doesn't trigger the "New Projects Found" wizard continuously.
+        // We wipe knownProjects, hiddenProjects, and customProjectNames so if they re-add the workspace,
+        // it acts as a fresh addition and asks them everything again.
+        const isCoveredByOther = (path) => workspaces.some(w => isSubPath(w.path || w, path));
+        
         Object.keys(customProjectNames).forEach(p => {
-            if (isSubPath(workspaceToDelete, p)) delete customProjectNames[p];
+            if (isSubPath(workspaceToDelete, p) && !isCoveredByOther(p)) delete customProjectNames[p];
         });
+        
+        knownProjects = knownProjects.filter(p => !isSubPath(workspaceToDelete, p) || isCoveredByOther(p));
+        hiddenProjects = hiddenProjects.filter(p => !isSubPath(workspaceToDelete, p) || isCoveredByOther(p));
         
         saveState();
         renderWorkspaces();
@@ -300,6 +306,7 @@ if (workspaces.length === 0) {
 function saveState() {
     localStorage.setItem('workspaces', JSON.stringify(workspaces));
     localStorage.setItem('hiddenProjects', JSON.stringify(hiddenProjects));
+    localStorage.setItem('knownProjects', JSON.stringify(knownProjects));
     localStorage.setItem('customProjectNames', JSON.stringify(customProjectNames));
     localStorage.setItem('pinnedProjects', JSON.stringify(pinnedProjects));
 }
@@ -434,6 +441,8 @@ if (scanSelectionSaveBtn) {
         scanSelectionModal.style.display = 'none';
         tempScannedProjects = [];
         tempWorkspacePath = null;
+        
+        updateTypeFilterDropdown();
         
         renderWorkspaces();
         renderProjects();
@@ -575,7 +584,11 @@ async function scanAllWorkspaces() {
 }
 
 function updateTypeFilterDropdown() {
-    const types = new Set(allProjects.map(p => p.project_type || 'Unknown'));
+    const types = new Set();
+    allProjects.forEach(p => {
+        const pt = p.project_type || 'Unknown';
+        pt.split(', ').forEach(t => types.add(t));
+    });
     const currentVal = projectTypeFilter.value;
     
     projectTypeFilter.innerHTML = '<option value="all">All Types</option>';
@@ -588,6 +601,8 @@ function updateTypeFilterDropdown() {
     
     if (types.has(currentVal)) {
         projectTypeFilter.value = currentVal;
+    } else {
+        projectTypeFilter.value = 'all';
     }
 }
 
@@ -628,7 +643,10 @@ function renderProjects() {
     }
     
     if (typeFilter !== 'all') {
-        visibleProjects = visibleProjects.filter(p => (p.project_type || 'Unknown') === typeFilter);
+        visibleProjects = visibleProjects.filter(p => {
+            const pt = p.project_type || 'Unknown';
+            return pt.split(', ').includes(typeFilter);
+        });
     }
 
     if (visibleProjects.length === 0) {
