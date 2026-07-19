@@ -1,3 +1,62 @@
+const { invoke } = window.__TAURI__.tauri;
+const { listen } = window.__TAURI__.event;
+const { open } = window.__TAURI__.dialog;
+
+// === CUSTOM UI MODALS ===
+function customAlert(message) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('custom-alert-modal');
+        const msgEl = document.getElementById('custom-alert-message');
+        const okBtn = document.getElementById('custom-alert-ok-btn');
+        msgEl.textContent = message;
+        modal.style.display = 'flex';
+        
+        const cleanup = () => {
+            modal.style.display = 'none';
+            okBtn.removeEventListener('click', onClick);
+            resolve();
+        };
+        
+        const onClick = () => cleanup();
+        okBtn.addEventListener('click', onClick);
+    });
+}
+
+function customPrompt(message, defaultText = '') {
+    return new Promise(resolve => {
+        const modal = document.getElementById('custom-prompt-modal');
+        const msgEl = document.getElementById('custom-prompt-message');
+        const inputEl = document.getElementById('custom-prompt-input');
+        const okBtn = document.getElementById('custom-prompt-ok-btn');
+        const cancelBtn = document.getElementById('custom-prompt-cancel-btn');
+        
+        msgEl.textContent = message;
+        inputEl.value = defaultText;
+        modal.style.display = 'flex';
+        inputEl.focus();
+        inputEl.select();
+        
+        const cleanup = (result) => {
+            modal.style.display = 'none';
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+            inputEl.removeEventListener('keydown', onKeyDown);
+            resolve(result);
+        };
+        
+        const onOk = () => cleanup(inputEl.value);
+        const onCancel = () => cleanup(null);
+        const onKeyDown = (e) => {
+            if (e.key === 'Enter') onOk();
+            if (e.key === 'Escape') onCancel();
+        };
+        
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        inputEl.addEventListener('keydown', onKeyDown);
+    });
+}
+
 function isSubPath(parentPath, childPath) {
     if (!parentPath || !childPath) return false;
     const p = parentPath.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase() + '/';
@@ -332,7 +391,7 @@ runCustomCmdBtn.addEventListener('click', async () => {
         renderScripts();
         renderTerminalTabs();
     } catch (e) {
-        alert("Error running command: " + e);
+        await customAlert("Error running command: " + e);
     }
 });
 
@@ -397,10 +456,10 @@ addWorkspaceBtn.addEventListener('click', async () => {
             } catch (e) {
                 scanProgressEl.style.display = 'none';
                 console.error("Error scanning workspace:", e);
-                alert("Error scanning workspace: " + e);
+                await customAlert("Error scanning workspace: " + e);
             }
         } else {
-            alert("Workspace already exists.");
+            await customAlert("Workspace already exists.");
         }
     }
 });
@@ -752,8 +811,8 @@ function selectProject(proj) {
     scriptsSection.style.display = 'block';
     renameProjectBtn.style.display = 'block';
     
-    renameProjectBtn.onclick = () => {
-        const newName = prompt("Enter new name for project:", customName);
+    renameProjectBtn.onclick = async () => {
+        const newName = await customPrompt("Enter new name for project:", customName);
         if (newName !== null && newName.trim() !== '') {
             customProjectNames[proj.path] = newName.trim();
             saveState();

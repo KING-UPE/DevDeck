@@ -212,7 +212,7 @@ fn find_projects_recursive(dir: &Path, depth: u32, max_depth: u32, app: Option<&
         for entry in entries.flatten() {
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy().to_string();
-            let ignored = ["node_modules", ".git", "AppData", "Local", "Roaming", "Temp", ".npm", ".cache", "vendor"];
+            let ignored = ["node_modules", ".git", "AppData", "Local", "Roaming", "Temp", ".npm", ".cache", "vendor", "$RECYCLE.BIN", "System Volume Information"];
             
             if file_name.starts_with('.') || ignored.contains(&file_name.as_str()) {
                 continue;

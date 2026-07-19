@@ -247,6 +247,29 @@
         </div>
     </div>
 
+    <!-- Custom Alert Modal -->
+    <div id="custom-alert-modal" class="modal-overlay" style="display: none; z-index: 10001; backdrop-filter: blur(10px);">
+        <div class="modal-content" style="width: 400px; max-width: 90vw; text-align: center; border: 1px solid var(--accent); box-shadow: 0 0 20px rgba(111, 237, 214, 0.2);">
+            <div style="margin-bottom: 1.5rem; color: var(--accent);">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            </div>
+            <p id="custom-alert-message" style="margin-bottom: 2rem; font-size: 1.1rem; line-height: 1.5; color: var(--text-primary);"></p>
+            <button id="custom-alert-ok-btn" class="btn btn-primary" style="width: 100%;">OK</button>
+        </div>
+    </div>
+
+    <!-- Custom Prompt Modal -->
+    <div id="custom-prompt-modal" class="modal-overlay" style="display: none; z-index: 10001; backdrop-filter: blur(10px);">
+        <div class="modal-content" style="width: 450px; max-width: 90vw; border: 1px solid var(--accent); box-shadow: 0 0 20px rgba(111, 237, 214, 0.2);">
+            <h3 id="custom-prompt-message" style="margin-top: 0; margin-bottom: 1rem; font-weight: 600;"></h3>
+            <input type="text" id="custom-prompt-input" style="width: 100%; padding: 0.75rem; margin-bottom: 1.5rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-color); color: var(--text-primary); outline: none; transition: border-color 0.2s;" />
+            <div style="display: flex; justify-content: flex-end; gap: 1rem;">
+                <button id="custom-prompt-cancel-btn" class="btn btn-secondary">Cancel</button>
+                <button id="custom-prompt-ok-btn" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script src="renderer.js"></script>
 </body>
 </html>
