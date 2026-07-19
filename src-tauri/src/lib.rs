@@ -172,6 +172,13 @@ fn parse_projects(paths: Vec<PathBuf>) -> Vec<ProjectInfo> {
             types.push("Ruby on Rails");
         }
         
+        if dir.join("index.html").exists() {
+            proj.scripts.insert("live server".to_string(), "npx live-server".to_string());
+            if !types.contains(&"Node.js") && !types.contains(&"Static Web") {
+                types.push("Static Web");
+            }
+        }
+        
         if !types.is_empty() {
             if types.contains(&"Rust") && types.contains(&"Node.js") {
                 proj.project_type = "Tauri (Rust+Node)".to_string();
