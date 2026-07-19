@@ -38,6 +38,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
+  padding-top: 100px; /* Prevent fixed navbar from overlapping content */
 }
 
 /* Glassmorphism Utilities */
