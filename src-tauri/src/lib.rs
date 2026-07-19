@@ -221,7 +221,7 @@ fn find_projects_recursive(dir: &Path, depth: u32, max_depth: u32, app: Option<&
             if path.is_dir() {
                 subdirs.push(path);
             } else {
-                let indicators = ["package.json", "Cargo.toml", "manage.py", "go.mod", "main.py", "app.py", "requirements.txt", "docker-compose.yml", "pom.xml", "composer.json", "Gemfile"];
+                let indicators = ["package.json", "Cargo.toml", "manage.py", "go.mod", "main.py", "app.py", "requirements.txt", "docker-compose.yml", "pom.xml", "composer.json", "Gemfile", "index.html"];
                 if indicators.contains(&file_name.as_str()) {
                     is_project = true;
                 }
