@@ -173,7 +173,7 @@ fn parse_projects(paths: Vec<PathBuf>) -> Vec<ProjectInfo> {
         }
         
         if dir.join("index.html").exists() {
-            proj.scripts.insert("live server".to_string(), "npx live-server".to_string());
+            proj.scripts.insert("live server".to_string(), "npx -y live-server".to_string());
             if !types.contains(&"Node.js") && !types.contains(&"Static Web") {
                 types.push("Static Web");
             }
