@@ -541,7 +541,6 @@ if (scanUnselectAllBtn) {
 
 
 const _ = window.__TAURI__.core.invoke;
-const listen = window.__TAURI__.event.listen;
 
 // Tauri Event listeners
 listen('process-output', (event) => {
