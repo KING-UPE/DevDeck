@@ -343,6 +343,7 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
         .args(["/C", &command_str])
         .current_dir(&project_path)
         .apply_cross_platform_flags()
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -415,6 +416,7 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
         .args(["/C", &script_cmd])
         .current_dir(&project_path)
         .apply_cross_platform_flags()
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -503,12 +505,35 @@ async fn select_directory(app: AppHandle) -> Result<Option<String>, String> {
         .pick_folder();
         
     if let Some(path) = folder {
-        Ok(Some(path.to_string_lossy().into_owned()))
+        Ok(Some(path.to_string_lossy().to_string()))
     } else {
         Ok(None)
     }
 }
 
+#[tauri::command]
+fn write_to_stdin(state: State<AppState>, process_key: String, input: String) -> Result<(), String> {
+    let mut processes = state.active_processes.lock().unwrap();
+    if let Some(child) = processes.get_mut(&process_key) {
+        if let Some(stdin) = child.stdin.as_mut() {
+            use std::io::Write;
+            let formatted_input = format!("{}\n", input);
+            stdin.write_all(formatted_input.as_bytes()).map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+    Err("Process or stdin not found".to_string())
+}
+
+#[tauri::command]
+fn open_external_terminal(path: String) -> Result<(), String> {
+    Command::new("cmd")
+        .args(["/C", "start", "cmd"])
+        .current_dir(path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -582,7 +607,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory
+            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

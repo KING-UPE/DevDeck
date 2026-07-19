@@ -275,6 +275,25 @@ const manageHiddenBtn = document.getElementById('manage-hidden-btn');
 const projectSearch = document.getElementById('project-search');
 const projectTypeFilter = document.getElementById('project-type-filter');
 const renameProjectBtn = document.getElementById('rename-project-btn');
+const openExternalTermBtn = document.getElementById('open-external-term-btn');
+const stdinInput = document.getElementById('stdin-input');
+
+stdinInput.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+        const input = stdinInput.value;
+        if (input.trim() !== '' && activeTerminalTab) {
+            try {
+                await window.__TAURI__.core.invoke('write_to_stdin', { 
+                    processKey: activeTerminalTab, 
+                    input: input 
+                });
+                stdinInput.value = '';
+            } catch (err) {
+                await customAlert("Failed to send input: " + err);
+            }
+        }
+    }
+});
 
 const scanSelectionModal = document.getElementById('scan-selection-modal');
 const scanSelectionList = document.getElementById('scan-selection-list');
@@ -810,6 +829,15 @@ function selectProject(proj) {
     activeProjectPath.textContent = proj.path;
     scriptsSection.style.display = 'block';
     renameProjectBtn.style.display = 'block';
+    openExternalTermBtn.style.display = 'block';
+    
+    openExternalTermBtn.onclick = async () => {
+        try {
+            await window.__TAURI__.core.invoke('open_external_terminal', { path: proj.path });
+        } catch (e) {
+            await customAlert("Failed to open terminal: " + e);
+        }
+    };
     
     renameProjectBtn.onclick = async () => {
         const newName = await customPrompt("Enter new name for project:", customName);
@@ -899,12 +927,15 @@ function renderTerminalTabs() {
     if (keys.length === 0) {
         terminalBody.innerHTML = '';
         activeTerminalTab = null;
+        stdinInput.disabled = true;
         return;
     }
 
     if (!activeTerminalTab || !keys.includes(activeTerminalTab)) {
         activeTerminalTab = keys[0];
     }
+    
+    stdinInput.disabled = !runningProcesses.has(activeTerminalTab);
 
     keys.forEach(key => {
         const parts = key.split(':');
@@ -941,6 +972,7 @@ function renderTerminalTabs() {
 
         tab.onclick = () => {
             activeTerminalTab = key;
+            stdinInput.disabled = !runningProcesses.has(activeTerminalTab);
             renderTerminalTabs();
         };
         terminalTabs.appendChild(tab);
