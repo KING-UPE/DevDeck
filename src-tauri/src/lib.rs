@@ -535,6 +535,11 @@ fn open_external_terminal(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn log_error(err: String) {
+    eprintln!("[FRONTEND ERROR] {}", err);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -613,7 +618,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal
+            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

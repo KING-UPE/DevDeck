@@ -1,7 +1,5 @@
-const { invoke } = window.__TAURI__.tauri;
+const invoke = window.__TAURI__.core.invoke;
 const { listen } = window.__TAURI__.event;
-const { open } = window.__TAURI__.dialog;
-
 // === CUSTOM UI MODALS ===
 function customAlert(message) {
     return new Promise(resolve => {
