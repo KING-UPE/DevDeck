@@ -293,12 +293,33 @@ fn get_node_processes() -> Result<Vec<NodeProcess>, String> {
         }
         
         let lower_path = project_path.to_lowercase();
+        let mut is_global = false;
+        let mut global_pkg = String::new();
+
         if lower_path.contains("npm-cache\\_npx") || 
            lower_path.contains("program files\\nodejs") || 
            lower_path.contains("program files (x86)\\nodejs") ||
            lower_path.contains("nvm\\v") ||
            lower_path.contains("yarn\\global") {
-            continue;
+            is_global = true;
+            if let Some(idx) = cmd.find("node_modules\\") {
+                let after = &cmd[idx + 13..];
+                if let Some(slash) = after.find('\\') {
+                    global_pkg = after[0..slash].to_string();
+                } else if let Some(space) = after.find(' ') {
+                    global_pkg = after[0..space].to_string();
+                } else {
+                    global_pkg = after.to_string();
+                }
+            }
+        }
+
+        if is_global {
+            if !global_pkg.is_empty() {
+                project_path = format!("Global Tool: {}", global_pkg);
+            } else {
+                project_path = "Global Node Process".to_string();
+            }
         }
 
         
