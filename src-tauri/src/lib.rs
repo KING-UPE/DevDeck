@@ -292,6 +292,16 @@ fn get_node_processes() -> Result<Vec<NodeProcess>, String> {
             }
         }
         
+        let lower_path = project_path.to_lowercase();
+        if lower_path.contains("npm-cache\\_npx") || 
+           lower_path.contains("program files\\nodejs") || 
+           lower_path.contains("program files (x86)\\nodejs") ||
+           lower_path.contains("nvm\\v") ||
+           lower_path.contains("yarn\\global") {
+            continue;
+        }
+
+        
         let mut script_type = "Node Process".to_string();
         if cmd.contains("npm-cli.js") { script_type = "NPM Wrapper".to_string(); }
         else if cmd.contains("next") { script_type = "Next.js".to_string(); }
