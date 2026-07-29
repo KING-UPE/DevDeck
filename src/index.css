@@ -509,3 +509,144 @@ body {
     color: #1a1b26;
     border-color: var(--danger);
 }
+
+/* IDE Launcher Styles */
+.ide-split-btn {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 6px;
+    background: rgba(122, 162, 247, 0.12);
+    border: 1px solid rgba(122, 162, 247, 0.3);
+    transition: all 0.2s ease;
+}
+
+.ide-split-btn:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgba(122, 162, 247, 0.2);
+}
+
+.ide-main-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+    transition: background 0.15s ease;
+}
+
+.ide-main-btn:hover {
+    background: rgba(122, 162, 247, 0.2);
+}
+
+.ide-arrow-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.35rem 0.45rem;
+    background: transparent;
+    border: none;
+    border-left: 1px solid rgba(122, 162, 247, 0.25);
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+    transition: all 0.15s ease;
+}
+
+.ide-arrow-btn:hover {
+    background: rgba(122, 162, 247, 0.2);
+    color: var(--accent);
+}
+
+.ide-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.35rem;
+    background: rgba(26, 29, 45, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem;
+    z-index: 200;
+    min-width: 220px;
+    max-height: 380px;
+    overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.ide-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.ide-option:hover {
+    background: var(--bg-surface-hover);
+}
+
+.ide-option-info {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.ide-option-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+}
+
+.ide-option-badge {
+    font-size: 0.68rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ide-option.is-default .ide-option-badge {
+    background: rgba(122, 162, 247, 0.2);
+    color: var(--accent);
+    border-color: rgba(122, 162, 247, 0.4);
+    font-weight: 600;
+}
+
+.quick-ide-btn {
+    padding: 0.25rem;
+    border-radius: 4px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.quick-ide-btn:hover {
+    background: rgba(122, 162, 247, 0.2);
+    color: var(--accent);
+}
+

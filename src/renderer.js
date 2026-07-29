@@ -75,6 +75,28 @@ let hiddenProjects = JSON.parse(localStorage.getItem('hiddenProjects') || '[]');
 let knownProjects = JSON.parse(localStorage.getItem('knownProjects') || '[]');
 let customProjectNames = JSON.parse(localStorage.getItem('customProjectNames') || '{}');
 let pinnedProjects = JSON.parse(localStorage.getItem('pinnedProjects') || '[]');
+let defaultIde = localStorage.getItem('defaultIde') || 'code';
+
+const IDE_TOOLS = [
+    { id: 'code', name: 'VS Code', badge: 'Default', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="#007ACC"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63L2.83 5.75a.997.997 0 0 0-1.409.096l-1.18 1.34a1 1 0 0 0 .096 1.409l4.51 3.96-4.51 3.96a1 1 0 0 0-.096 1.409l1.18 1.34a.998.998 0 0 0 1.409.096l4.215-3.38 9.46 8.63a1.494 1.494 0 0 0 1.705.29l4.94-2.377A1.5 1.5 0 0 0 24 21.75V3.75a1.5 1.5 0 0 0-.85-1.163zM18 17.55l-7.25-5.55L18 6.45v11.1z"/></svg>` },
+    { id: 'code-insiders', name: 'VS Code Insiders', badge: 'Insiders', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="#23A566"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63L2.83 5.75a.997.997 0 0 0-1.409.096l-1.18 1.34a1 1 0 0 0 .096 1.409l4.51 3.96-4.51 3.96a1 1 0 0 0-.096 1.409l1.18 1.34a.998.998 0 0 0 1.409.096l4.215-3.38 9.46 8.63a1.494 1.494 0 0 0 1.705.29l4.94-2.377A1.5 1.5 0 0 0 24 21.75V3.75a1.5 1.5 0 0 0-.85-1.163zM18 17.55l-7.25-5.55L18 6.45v11.1z"/></svg>` },
+    { id: 'cursor', name: 'Cursor', badge: 'AI IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7v10l10 5 10-5V7L12 2zm8 14.26l-8 4-8-4V8.74l8-4 8 4v7.52z" fill="#00D2FF"/><path d="M12 6.5L6 9.5v5l6 3 6-3v-5l-6-3z" fill="#00D2FF"/></svg>` },
+    { id: 'windsurf', name: 'Windsurf', badge: 'AI IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 18c3-4 6-6 10-6s7 2 7 6H4zm0-6c2-4 5-7 10-7s8 3 9 7H4z" fill="#00E5FF"/></svg>` },
+    { id: 'idea', name: 'IntelliJ IDEA', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#ij_g)"/><path d="M4 18h8v2H4v-2zm0-12h3v10H4V6zm5 0h3v7h-3V6zm-5 5h7v2H4v-2z" fill="#FFF"/><defs><linearGradient id="ij_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#FE2857"/><stop offset="100%" stop-color="#087CFA"/></linearGradient></defs></svg>` },
+    { id: 'webstorm', name: 'WebStorm', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#ws_g)"/><text x="2.5" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">WS</text><defs><linearGradient id="ws_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#087CFA"/><stop offset="100%" stop-color="#30D5C8"/></linearGradient></defs></svg>` },
+    { id: 'pycharm', name: 'PyCharm', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#pc_g)"/><text x="3" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">PC</text><defs><linearGradient id="pc_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#21D789"/><stop offset="100%" stop-color="#087CFA"/></linearGradient></defs></svg>` },
+    { id: 'sublime', name: 'Sublime Text', badge: 'Editor', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 16.5L14 21l7-3-11-4.5L3 16.5zM21 7.5L10 3 3 6l11 4.5L21 7.5zM3 11.5L14 16l7-3-11-4.5L3 11.5z" fill="#FF9800"/></svg>` },
+    { id: 'fleet', name: 'JetBrains Fleet', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#fl_g)"/><text x="3.5" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">FL</text><defs><linearGradient id="fl_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#7B2CBF"/><stop offset="100%" stop-color="#E0AAFF"/></linearGradient></defs></svg>` },
+    { id: 'studio', name: 'Android Studio', badge: 'Android', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#3DDC84"/><path d="M7 14l2.5-4.5M17 14l-2.5-4.5M9 7a1 1 0 0 1 2 0v1h2V7a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v4H6v-4a2 2 0 0 1 2-2h1V7z" fill="#1A1D2D"/></svg>` },
+    { id: 'zed', name: 'Zed Editor', badge: 'Fast IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#18181B"/><path d="M6 7h12l-9 10h9" stroke="#A1A1AA" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>` },
+    { id: 'explorer', name: 'File Explorer', badge: 'System', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#FFA726"/></svg>` },
+    { id: 'terminal', name: 'Native Terminal', badge: 'CLI', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7AA2F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>` }
+];
+
+function getIdeInfo(id) {
+    return IDE_TOOLS.find(t => t.id === id) || IDE_TOOLS[0];
+}
+
 let showHidden = false;
 let activeWorkspace = null;
 let activeProject = null;
@@ -275,6 +297,87 @@ const projectTypeFilter = document.getElementById('project-type-filter');
 const renameProjectBtn = document.getElementById('rename-project-btn');
 const openExternalTermBtn = document.getElementById('open-external-term-btn');
 const stdinInput = document.getElementById('stdin-input');
+
+const ideLauncherContainer = document.getElementById('ide-launcher-container');
+const openIdeBtn = document.getElementById('open-ide-btn');
+const openIdeIcon = document.getElementById('open-ide-icon');
+const openIdeLabel = document.getElementById('open-ide-label');
+const openIdeDropdownToggle = document.getElementById('open-ide-dropdown-toggle');
+const ideDropdownMenu = document.getElementById('ide-dropdown-menu');
+
+function updateMainIdeButton() {
+    const current = getIdeInfo(defaultIde);
+    if (openIdeIcon) openIdeIcon.innerHTML = current.icon;
+    if (openIdeLabel) openIdeLabel.textContent = current.name;
+    if (openIdeBtn) openIdeBtn.title = `Open project in ${current.name}`;
+}
+
+function renderIdeDropdown() {
+    if (!ideDropdownMenu) return;
+    ideDropdownMenu.innerHTML = '';
+    IDE_TOOLS.forEach(tool => {
+        const option = document.createElement('div');
+        option.className = `ide-option ${tool.id === defaultIde ? 'is-default' : ''}`;
+        
+        option.innerHTML = `
+            <div class="ide-option-info">
+                <span class="ide-option-icon">${tool.icon}</span>
+                <span>${tool.name}</span>
+            </div>
+            <span class="ide-option-badge">${tool.id === defaultIde ? 'Default' : tool.badge}</span>
+        `;
+
+        option.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            ideDropdownMenu.style.display = 'none';
+            if (activeProject) {
+                try {
+                    await window.__TAURI__.core.invoke('open_in_editor', { path: activeProject.path, tool: tool.id });
+                } catch (err) {
+                    await customAlert(`Failed to launch ${tool.name}: ` + err);
+                }
+            }
+        });
+
+        option.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            defaultIde = tool.id;
+            localStorage.setItem('defaultIde', defaultIde);
+            updateMainIdeButton();
+            renderIdeDropdown();
+            renderProjects();
+        });
+
+        ideDropdownMenu.appendChild(option);
+    });
+}
+
+if (openIdeBtn) {
+    openIdeBtn.addEventListener('click', async () => {
+        if (!activeProject) return;
+        try {
+            await window.__TAURI__.core.invoke('open_in_editor', { path: activeProject.path, tool: defaultIde });
+        } catch (err) {
+            await customAlert(`Could not launch ${getIdeInfo(defaultIde).name}: ` + err);
+        }
+    });
+}
+
+if (openIdeDropdownToggle) {
+    openIdeDropdownToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = ideDropdownMenu.style.display === 'flex' || ideDropdownMenu.style.display === 'block';
+        ideDropdownMenu.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) renderIdeDropdown();
+    });
+}
+
+document.addEventListener('click', (e) => {
+    if (ideDropdownMenu && ideLauncherContainer && !ideLauncherContainer.contains(e.target)) {
+        ideDropdownMenu.style.display = 'none';
+    }
+});
+
 
 stdinInput.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter') {
@@ -770,18 +873,37 @@ function renderProjects() {
             pinBtn.style.transition = 'opacity 0.2s';
             pinBtn.style.color = isPinned ? 'var(--accent)' : 'inherit';
 
+            const currentIde = getIdeInfo(defaultIde);
+            const quickIdeBtn = document.createElement('button');
+            quickIdeBtn.className = 'btn-icon quick-ide-btn';
+            quickIdeBtn.innerHTML = currentIde.icon;
+            quickIdeBtn.title = `Open in ${currentIde.name}`;
+            quickIdeBtn.style.opacity = '0';
+            quickIdeBtn.style.transition = 'opacity 0.2s';
+            quickIdeBtn.onclick = async (e) => {
+                e.stopPropagation();
+                try {
+                    await window.__TAURI__.core.invoke('open_in_editor', { path: proj.path, tool: defaultIde });
+                } catch (err) {
+                    await customAlert(`Could not launch ${currentIde.name}: ` + err);
+                }
+            };
+
             const actionsDiv = document.createElement('div');
             actionsDiv.style.display = 'flex';
             actionsDiv.style.gap = '0.25rem';
+            actionsDiv.appendChild(quickIdeBtn);
             actionsDiv.appendChild(pinBtn);
             actionsDiv.appendChild(toggleBtn);
             
             div.onmouseenter = () => {
                 toggleBtn.style.opacity = '1';
                 pinBtn.style.opacity = '1';
+                quickIdeBtn.style.opacity = '1';
             };
             div.onmouseleave = () => {
                 toggleBtn.style.opacity = '0';
+                quickIdeBtn.style.opacity = '0';
                 if (!pinnedProjects.includes(proj.path)) pinBtn.style.opacity = '0';
             };
             
@@ -827,6 +949,10 @@ function selectProject(proj) {
     scriptsSection.style.display = 'block';
     renameProjectBtn.style.display = 'block';
     openExternalTermBtn.style.display = 'block';
+    if (ideLauncherContainer) {
+        ideLauncherContainer.style.display = 'block';
+        updateMainIdeButton();
+    }
     
     openExternalTermBtn.onclick = async () => {
         try {

@@ -557,6 +557,67 @@ fn write_to_stdin(state: State<AppState>, process_key: String, input: String) ->
 }
 
 #[tauri::command]
+fn open_in_editor(path: String, tool: String) -> Result<(), String> {
+    let cmd_target = match tool.as_str() {
+        "code" => "code",
+        "code-insiders" => "code-insiders",
+        "cursor" => "cursor",
+        "windsurf" => "windsurf",
+        "idea" => "idea",
+        "webstorm" => "webstorm",
+        "pycharm" => "pycharm",
+        "sublime" => "subl",
+        "fleet" => "fleet",
+        "studio" => "studio",
+        "zed" => "zed",
+        "explorer" => "explorer",
+        "terminal" => "cmd",
+        _ => &tool,
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        if cmd_target == "explorer" {
+            Command::new("explorer")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else if cmd_target == "cmd" {
+            Command::new("cmd")
+                .args(["/C", "start", "cmd"])
+                .current_dir(&path)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            let status = Command::new("cmd")
+                .args(["/C", "start", "", cmd_target, &path])
+                .apply_cross_platform_flags()
+                .spawn();
+            
+            if let Err(e) = status {
+                return Err(format!("Could not launch {}: {}", tool, e));
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if cmd_target == "explorer" {
+            Command::new("open")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            Command::new(cmd_target)
+                .arg(&path)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+#[tauri::command]
 fn open_external_terminal(path: String) -> Result<(), String> {
     Command::new("cmd")
         .args(["/C", "start", "cmd"])
@@ -649,7 +710,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, log_error
+            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
