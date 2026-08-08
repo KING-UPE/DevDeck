@@ -558,42 +558,74 @@ fn write_to_stdin(state: State<AppState>, process_key: String, input: String) ->
 
 #[tauri::command]
 fn open_in_editor(path: String, tool: String) -> Result<(), String> {
-    let cmd_target = match tool.as_str() {
-        "code" => "code",
-        "code-insiders" => "code-insiders",
-        "cursor" => "cursor",
-        "windsurf" => "windsurf",
-        "idea" => "idea",
-        "webstorm" => "webstorm",
-        "pycharm" => "pycharm",
-        "sublime" => "subl",
-        "fleet" => "fleet",
-        "studio" => "studio",
-        "zed" => "zed",
-        "explorer" => "explorer",
-        "terminal" => "cmd",
-        _ => &tool,
-    };
+    let tool_lower = tool.to_lowercase();
+
+    let is_cli_agent = matches!(
+        tool_lower.as_str(),
+        "antigravity" | "agy" | "claude" | "claude-cli" | "aider" | "copilot" | "gemini" | "terminal" | "cmd"
+    );
 
     #[cfg(target_os = "windows")]
     {
-        if cmd_target == "explorer" {
+        if tool_lower == "explorer" {
             Command::new("explorer")
                 .arg(&path)
                 .spawn()
                 .map_err(|e| e.to_string())?;
-        } else if cmd_target == "cmd" {
+        } else if is_cli_agent {
+            let cli_cmd = match tool_lower.as_str() {
+                "antigravity" | "agy" => "agy",
+                "claude" | "claude-cli" => "claude",
+                "aider" => "aider",
+                "copilot" => "gh copilot",
+                "gemini" => "gemini",
+                _ => "",
+            };
+
+            let title = if cli_cmd.is_empty() {
+                "Terminal".to_string()
+            } else {
+                format!("DevDeck - {}", tool)
+            };
+
+            let cmd_args = if cli_cmd.is_empty() {
+                format!("start \"{}\" cmd /K \"cd /d {}\"", title, path)
+            } else {
+                format!("start \"{}\" cmd /K \"cd /d {} && {}\"", title, path, cli_cmd)
+            };
+
             Command::new("cmd")
-                .args(["/C", "start", "cmd"])
-                .current_dir(&path)
+                .args(["/C", &cmd_args])
+                .apply_cross_platform_flags()
                 .spawn()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("Failed to launch AI agent/terminal: {}", e))?;
         } else {
-            let status = Command::new("cmd")
-                .args(["/C", "start", "", cmd_target, &path])
+            let cmd_target = match tool_lower.as_str() {
+                "code" => "code",
+                "code-insiders" => "code-insiders",
+                "cursor" => "cursor",
+                "windsurf" => "windsurf",
+                "idea" => "idea",
+                "webstorm" => "webstorm",
+                "pycharm" => "pycharm",
+                "sublime" => "subl",
+                "fleet" => "fleet",
+                "studio" => "studio",
+                "zed" => "zed",
+                _ => &tool,
+            };
+
+            let ps_script = format!(
+                "Start-Process -FilePath '{}' -ArgumentList '\"{}\"' -WindowStyle Hidden",
+                cmd_target,
+                path.replace("'", "''")
+            );
+
+            let status = Command::new("powershell")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
                 .apply_cross_platform_flags()
                 .spawn();
-            
+
             if let Err(e) = status {
                 return Err(format!("Could not launch {}: {}", tool, e));
             }
@@ -602,12 +634,18 @@ fn open_in_editor(path: String, tool: String) -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        if cmd_target == "explorer" {
+        if tool_lower == "explorer" {
             Command::new("open")
                 .arg(&path)
                 .spawn()
                 .map_err(|e| e.to_string())?;
         } else {
+            let cmd_target = match tool_lower.as_str() {
+                "antigravity" | "agy" => "agy",
+                "claude" | "claude-cli" => "claude",
+                "sublime" => "subl",
+                _ => &tool,
+            };
             Command::new(cmd_target)
                 .arg(&path)
                 .spawn()

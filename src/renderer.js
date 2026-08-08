@@ -78,19 +78,29 @@ let pinnedProjects = JSON.parse(localStorage.getItem('pinnedProjects') || '[]');
 let defaultIde = localStorage.getItem('defaultIde') || 'code';
 
 const IDE_TOOLS = [
-    { id: 'code', name: 'VS Code', badge: 'Default', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="#007ACC"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63L2.83 5.75a.997.997 0 0 0-1.409.096l-1.18 1.34a1 1 0 0 0 .096 1.409l4.51 3.96-4.51 3.96a1 1 0 0 0-.096 1.409l1.18 1.34a.998.998 0 0 0 1.409.096l4.215-3.38 9.46 8.63a1.494 1.494 0 0 0 1.705.29l4.94-2.377A1.5 1.5 0 0 0 24 21.75V3.75a1.5 1.5 0 0 0-.85-1.163zM18 17.55l-7.25-5.55L18 6.45v11.1z"/></svg>` },
-    { id: 'code-insiders', name: 'VS Code Insiders', badge: 'Insiders', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="#23A566"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63L2.83 5.75a.997.997 0 0 0-1.409.096l-1.18 1.34a1 1 0 0 0 .096 1.409l4.51 3.96-4.51 3.96a1 1 0 0 0-.096 1.409l1.18 1.34a.998.998 0 0 0 1.409.096l4.215-3.38 9.46 8.63a1.494 1.494 0 0 0 1.705.29l4.94-2.377A1.5 1.5 0 0 0 24 21.75V3.75a1.5 1.5 0 0 0-.85-1.163zM18 17.55l-7.25-5.55L18 6.45v11.1z"/></svg>` },
-    { id: 'cursor', name: 'Cursor', badge: 'AI IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7v10l10 5 10-5V7L12 2zm8 14.26l-8 4-8-4V8.74l8-4 8 4v7.52z" fill="#00D2FF"/><path d="M12 6.5L6 9.5v5l6 3 6-3v-5l-6-3z" fill="#00D2FF"/></svg>` },
-    { id: 'windsurf', name: 'Windsurf', badge: 'AI IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 18c3-4 6-6 10-6s7 2 7 6H4zm0-6c2-4 5-7 10-7s8 3 9 7H4z" fill="#00E5FF"/></svg>` },
-    { id: 'idea', name: 'IntelliJ IDEA', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#ij_g)"/><path d="M4 18h8v2H4v-2zm0-12h3v10H4V6zm5 0h3v7h-3V6zm-5 5h7v2H4v-2z" fill="#FFF"/><defs><linearGradient id="ij_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#FE2857"/><stop offset="100%" stop-color="#087CFA"/></linearGradient></defs></svg>` },
-    { id: 'webstorm', name: 'WebStorm', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#ws_g)"/><text x="2.5" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">WS</text><defs><linearGradient id="ws_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#087CFA"/><stop offset="100%" stop-color="#30D5C8"/></linearGradient></defs></svg>` },
-    { id: 'pycharm', name: 'PyCharm', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#pc_g)"/><text x="3" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">PC</text><defs><linearGradient id="pc_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#21D789"/><stop offset="100%" stop-color="#087CFA"/></linearGradient></defs></svg>` },
-    { id: 'sublime', name: 'Sublime Text', badge: 'Editor', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 16.5L14 21l7-3-11-4.5L3 16.5zM21 7.5L10 3 3 6l11 4.5L21 7.5zM3 11.5L14 16l7-3-11-4.5L3 11.5z" fill="#FF9800"/></svg>` },
-    { id: 'fleet', name: 'JetBrains Fleet', badge: 'JetBrains', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#fl_g)"/><text x="3.5" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">FL</text><defs><linearGradient id="fl_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#7B2CBF"/><stop offset="100%" stop-color="#E0AAFF"/></linearGradient></defs></svg>` },
-    { id: 'studio', name: 'Android Studio', badge: 'Android', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#3DDC84"/><path d="M7 14l2.5-4.5M17 14l-2.5-4.5M9 7a1 1 0 0 1 2 0v1h2V7a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v4H6v-4a2 2 0 0 1 2-2h1V7z" fill="#1A1D2D"/></svg>` },
-    { id: 'zed', name: 'Zed Editor', badge: 'Fast IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#18181B"/><path d="M6 7h12l-9 10h9" stroke="#A1A1AA" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>` },
-    { id: 'explorer', name: 'File Explorer', badge: 'System', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#FFA726"/></svg>` },
-    { id: 'terminal', name: 'Native Terminal', badge: 'CLI', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7AA2F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>` }
+    // GUI IDEs & Editors
+    { id: 'code', name: 'VS Code', badge: 'Default', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="#007ACC"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63L2.83 5.75a.997.997 0 0 0-1.409.096l-1.18 1.34a1 1 0 0 0 .096 1.409l4.51 3.96-4.51 3.96a1 1 0 0 0-.096 1.409l1.18 1.34a.998.998 0 0 0 1.409.096l4.215-3.38 9.46 8.63a1.494 1.494 0 0 0 1.705.29l4.94-2.377A1.5 1.5 0 0 0 24 21.75V3.75a1.5 1.5 0 0 0-.85-1.163zM18 17.55l-7.25-5.55L18 6.45v11.1z"/></svg>` },
+    { id: 'code-insiders', name: 'VS Code Insiders', badge: 'Insiders', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="#23A566"><path d="M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63L2.83 5.75a.997.997 0 0 0-1.409.096l-1.18 1.34a1 1 0 0 0 .096 1.409l4.51 3.96-4.51 3.96a1 1 0 0 0-.096 1.409l1.18 1.34a.998.998 0 0 0 1.409.096l4.215-3.38 9.46 8.63a1.494 1.494 0 0 0 1.705.29l4.94-2.377A1.5 1.5 0 0 0 24 21.75V3.75a1.5 1.5 0 0 0-.85-1.163zM18 17.55l-7.25-5.55L18 6.45v11.1z"/></svg>` },
+    { id: 'cursor', name: 'Cursor', badge: 'AI IDE', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7v10l10 5 10-5V7L12 2zm8 14.26l-8 4-8-4V8.74l8-4 8 4v7.52z" fill="#00D2FF"/><path d="M12 6.5L6 9.5v5l6 3 6-3v-5l-6-3z" fill="#00D2FF"/></svg>` },
+    { id: 'windsurf', name: 'Windsurf', badge: 'AI IDE', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 18c3-4 6-6 10-6s7 2 7 6H4zm0-6c2-4 5-7 10-7s8 3 9 7H4z" fill="#00E5FF"/></svg>` },
+    { id: 'idea', name: 'IntelliJ IDEA', badge: 'JetBrains', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#ij_g)"/><path d="M4 18h8v2H4v-2zm0-12h3v10H4V6zm5 0h3v7h-3V6zm-5 5h7v2H4v-2z" fill="#FFF"/><defs><linearGradient id="ij_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#FE2857"/><stop offset="100%" stop-color="#087CFA"/></linearGradient></defs></svg>` },
+    { id: 'webstorm', name: 'WebStorm', badge: 'JetBrains', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#ws_g)"/><text x="2.5" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">WS</text><defs><linearGradient id="ws_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#087CFA"/><stop offset="100%" stop-color="#30D5C8"/></linearGradient></defs></svg>` },
+    { id: 'pycharm', name: 'PyCharm', badge: 'JetBrains', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#pc_g)"/><text x="3" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">PC</text><defs><linearGradient id="pc_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#21D789"/><stop offset="100%" stop-color="#087CFA"/></linearGradient></defs></svg>` },
+    { id: 'sublime', name: 'Sublime Text', badge: 'Editor', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 16.5L14 21l7-3-11-4.5L3 16.5zM21 7.5L10 3 3 6l11 4.5L21 7.5zM3 11.5L14 16l7-3-11-4.5L3 11.5z" fill="#FF9800"/></svg>` },
+    { id: 'fleet', name: 'JetBrains Fleet', badge: 'JetBrains', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="url(#fl_g)"/><text x="3.5" y="16.5" font-family="sans-serif" font-weight="900" font-size="11" fill="#FFF">FL</text><defs><linearGradient id="fl_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#7B2CBF"/><stop offset="100%" stop-color="#E0AAFF"/></linearGradient></defs></svg>` },
+    { id: 'studio', name: 'Android Studio', badge: 'Android', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#3DDC84"/><path d="M7 14l2.5-4.5M17 14l-2.5-4.5M9 7a1 1 0 0 1 2 0v1h2V7a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v4H6v-4a2 2 0 0 1 2-2h1V7z" fill="#1A1D2D"/></svg>` },
+    { id: 'zed', name: 'Zed Editor', badge: 'Fast IDE', category: 'IDE', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="4" fill="#18181B"/><path d="M6 7h12l-9 10h9" stroke="#A1A1AA" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>` },
+    
+    // AI Agents & CLI Tools
+    { id: 'antigravity', name: 'Antigravity AI', badge: 'AI Agent', category: 'AI', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2L3 15h6v7l9-13h-6V2z" fill="url(#agy_g)"/><defs><linearGradient id="agy_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#BB86FC"/><stop offset="100%" stop-color="#03DAC6"/></linearGradient></defs></svg>` },
+    { id: 'claude', name: 'Claude Code CLI', badge: 'AI Agent', category: 'AI', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2z" fill="#D97757"/></svg>` },
+    { id: 'aider', name: 'Aider AI Agent', badge: 'AI Agent', category: 'AI', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="5" fill="#8B5CF6"/><path d="M7 17L12 7l5 10m-8.5-3h7" stroke="#FFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>` },
+    { id: 'copilot', name: 'GitHub Copilot CLI', badge: 'AI Agent', category: 'AI', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2a10 10 0 00-10 10c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0012 2z" fill="#6E40C9"/></svg>` },
+    { id: 'gemini', name: 'Gemini CLI', badge: 'AI Agent', category: 'AI', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2C12 7.52 7.52 12 2 12c5.52 0 10 4.48 10 10 0-5.52 4.48-10 10-10-5.52 0-10-4.48-10-10z" fill="url(#gem_g)"/><defs><linearGradient id="gem_g" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#1A73E8"/><stop offset="50%" stop-color="#8AB4F8"/><stop offset="100%" stop-color="#E8EAED"/></linearGradient></defs></svg>` },
+
+    // System Utilities
+    { id: 'explorer', name: 'File Explorer', badge: 'System', category: 'System', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" fill="#FFA726"/></svg>` },
+    { id: 'terminal', name: 'Native Terminal', badge: 'CLI', category: 'System', icon: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7AA2F7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>` }
 ];
 
 function getIdeInfo(id) {
@@ -315,40 +325,63 @@ function updateMainIdeButton() {
 function renderIdeDropdown() {
     if (!ideDropdownMenu) return;
     ideDropdownMenu.innerHTML = '';
-    IDE_TOOLS.forEach(tool => {
-        const option = document.createElement('div');
-        option.className = `ide-option ${tool.id === defaultIde ? 'is-default' : ''}`;
-        
-        option.innerHTML = `
-            <div class="ide-option-info">
-                <span class="ide-option-icon">${tool.icon}</span>
-                <span>${tool.name}</span>
-            </div>
-            <span class="ide-option-badge">${tool.id === defaultIde ? 'Default' : tool.badge}</span>
-        `;
 
-        option.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            ideDropdownMenu.style.display = 'none';
-            if (activeProject) {
-                try {
-                    await window.__TAURI__.core.invoke('open_in_editor', { path: activeProject.path, tool: tool.id });
-                } catch (err) {
-                    await customAlert(`Failed to launch ${tool.name}: ` + err);
+    const categories = [
+        { key: 'IDE', label: 'IDEs & Editors' },
+        { key: 'AI', label: 'AI Agents & CLI' },
+        { key: 'System', label: 'System Utilities' }
+    ];
+
+    categories.forEach(cat => {
+        const toolsInCat = IDE_TOOLS.filter(t => t.category === cat.key);
+        if (toolsInCat.length === 0) return;
+
+        const header = document.createElement('div');
+        header.style.fontSize = '0.68rem';
+        header.style.fontWeight = '700';
+        header.style.textTransform = 'uppercase';
+        header.style.letterSpacing = '0.05em';
+        header.style.color = 'var(--text-secondary)';
+        header.style.padding = '0.4rem 0.6rem 0.2rem 0.6rem';
+        header.style.marginTop = '0.2rem';
+        header.textContent = cat.label;
+        ideDropdownMenu.appendChild(header);
+
+        toolsInCat.forEach(tool => {
+            const option = document.createElement('div');
+            option.className = `ide-option ${tool.id === defaultIde ? 'is-default' : ''}`;
+            
+            option.innerHTML = `
+                <div class="ide-option-info">
+                    <span class="ide-option-icon">${tool.icon}</span>
+                    <span>${tool.name}</span>
+                </div>
+                <span class="ide-option-badge">${tool.id === defaultIde ? 'Default' : tool.badge}</span>
+            `;
+
+            option.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                ideDropdownMenu.style.display = 'none';
+                if (activeProject) {
+                    try {
+                        await window.__TAURI__.core.invoke('open_in_editor', { path: activeProject.path, tool: tool.id });
+                    } catch (err) {
+                        await customAlert(`Failed to launch ${tool.name}: ` + err);
+                    }
                 }
-            }
-        });
+            });
 
-        option.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            defaultIde = tool.id;
-            localStorage.setItem('defaultIde', defaultIde);
-            updateMainIdeButton();
-            renderIdeDropdown();
-            renderProjects();
-        });
+            option.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                defaultIde = tool.id;
+                localStorage.setItem('defaultIde', defaultIde);
+                updateMainIdeButton();
+                renderIdeDropdown();
+                renderProjects();
+            });
 
-        ideDropdownMenu.appendChild(option);
+            ideDropdownMenu.appendChild(option);
+        });
     });
 }
 
