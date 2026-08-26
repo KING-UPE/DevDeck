@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Page not found &mdash; DevDeck</title>
+    <meta name="description" content="That DevDeck page does not exist. Head back to the DevDeck home page or the download page." />
+    <meta name="robots" content="noindex, follow" />
+    <meta name="theme-color" content="#0a0a0f" />
+    <link rel="icon" type="image/png" href="https://king-upe.github.io/DevDeck/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="./style.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="ambient-ball"></div>
+    <!-- Header -->
+    <header>
+      <div class="container">
+        <nav class="nav-container glass">
+          <a href="/DevDeck/" class="logo">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-accent"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+            DevDeck
+          </a>
+                    <button class="hamburger" aria-label="Toggle Menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <div class="nav-links">
+            <a href="/DevDeck/">Home</a>
+            <a href="/DevDeck/download.html">Download</a>
+            <a href="/DevDeck/help.html">Documentation</a>
+            <a href="/DevDeck/about.html" class="active">About Developer</a>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="main" style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding-top: 5rem;">
+      <section class="section text-center">
+        <div class="container" style="max-width: 620px;">
+          <p class="eyebrow">Error 404</p>
+          <h1 class="text-gradient" style="font-size: 3rem; margin-bottom: 1rem;">Page not found</h1>
+          <p style="margin-bottom: 2rem;">That page isn't here. These are:</p>
+          <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <a href="/DevDeck/" class="btn btn-primary">DevDeck Home</a>
+            <a href="/DevDeck/download.html" class="btn btn-outline glass">Download DevDeck</a>
+            <a href="/DevDeck/help.html" class="btn btn-outline glass">Documentation</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer style="padding: 2.5rem 0 1.5rem 0; border: none; background: transparent;">
+      <div class="container">
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="/DevDeck/">DevDeck Home</a>
+          <a href="/DevDeck/download.html">Download DevDeck</a>
+          <a href="/DevDeck/help.html">Documentation</a>
+          <a href="/DevDeck/about.html">About the Developer</a>
+          <a href="https://github.com/KING-UPE/DevDeck" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+          <a href="https://github.com/KING-UPE/DevDeck/releases" target="_blank" rel="noopener noreferrer">Release Notes</a>
+          <a href="https://github.com/KING-UPE/DevDeck/issues" target="_blank" rel="noopener noreferrer">Report an Issue</a>
+        </nav>
+      </div>
+      <div class="container" style="display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.85rem; flex-wrap: wrap; gap: 1rem; margin-top: 1.5rem;">
+        <div>&copy; DevDeck. Open Source Software (MIT).</div>
+        <div>
+          Designed &amp; Developed by <a href="https://upendradasanayaka.vercel.app/" target="_blank" rel="noopener noreferrer" style="color: var(--text-primary); text-decoration: none; font-weight: 500; transition: color 0.2s;">Upendra Dasanayaka</a>
+        </div>
+      </div>
+    </footer>
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const hamburger = document.querySelector('.hamburger');
+    const navLinks = document.querySelector('.nav-links');
+    if (hamburger && navLinks) {
+      hamburger.addEventListener('click', () => {
+        navLinks.classList.toggle('active');
+      });
+    }
+  });
+</script>
+</body>
+</html>

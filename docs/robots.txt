@@ -1,0 +1,21 @@
+# robots.txt for DevDeck — https://king-upe.github.io/DevDeck/
+User-agent: *
+Allow: /
+
+# AI / answer engines are welcome (helps DevDeck show up in AI answers)
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://king-upe.github.io/DevDeck/sitemap.xml

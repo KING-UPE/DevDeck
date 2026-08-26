@@ -2,6 +2,11 @@
   <img src="src/assets/logo.png" alt="DevDeck Logo" width="128" />
   <h1>DevDeck</h1>
   <p>Your beautiful, centralized workspace and terminal manager.</p>
+  <p>
+    <a href="https://king-upe.github.io/DevDeck/"><strong>Website</strong></a> &middot;
+    <a href="https://king-upe.github.io/DevDeck/download.html">Download</a> &middot;
+    <a href="https://king-upe.github.io/DevDeck/help.html">Documentation</a>
+  </p>
 </div>
 
 DevDeck is a sleek desktop application that allows you to manage all of your development workspaces in one place. Easily scan folders for projects, manage built-in terminal tabs, run custom commands, and organize your environment.

@@ -3,25 +3,51 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>About Developer | DevDeck</title>
-  <link rel="icon" type="image/png" href="favicon.png">
-    <meta name="description" content="Learn more about Upendra Dasanayaka, the developer behind DevDeck." />
-    <meta name="keywords" content="Upendra Dasanayaka, developer, creator of DevDeck, DevDeck about" />
+
+    <!-- Search Console ownership -->
+    <meta name="google-site-verification" content="RdZXYOYQ8MDaXoRJQwWqoU8iVnyaSWaRL-9FbuEAXOU" />
+
+    <!-- Primary -->
+    <title>About DevDeck &amp; Upendra Dasanayaka &mdash; The Developer Behind It</title>
+    <meta name="description" content="DevDeck is built and maintained by Upendra Dasanayaka, a software engineer focused on fast, beautiful developer tooling. Learn about the project and its creator." />
+    <meta name="keywords" content="About DevDeck, Upendra Dasanayaka, DevDeck developer, DevDeck creator, who made DevDeck, DevDeck open source" />
     <meta name="author" content="Upendra Dasanayaka" />
-    
-    <!-- Open Graph / Facebook -->
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <link rel="canonical" href="https://king-upe.github.io/DevDeck/about.html" />
+    <meta name="theme-color" content="#0a0a0f" />
+    <meta name="application-name" content="DevDeck" />
+    <meta name="apple-mobile-web-app-title" content="DevDeck" />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/png" href="https://king-upe.github.io/DevDeck/favicon.png" />
+    <link rel="apple-touch-icon" href="https://king-upe.github.io/DevDeck/favicon.png" />
+
+    <!-- Open Graph -->
     <meta property="og:type" content="profile" />
+    <meta property="og:site_name" content="DevDeck" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:url" content="https://king-upe.github.io/DevDeck/about.html" />
-    <meta property="og:title" content="About Developer | DevDeck" />
-    <meta property="og:description" content="Learn more about Upendra Dasanayaka, the developer behind DevDeck." />
-    
+    <meta property="og:title" content="About DevDeck &amp; Upendra Dasanayaka &mdash; The Developer Behind It" />
+    <meta property="og:description" content="DevDeck is built and maintained by Upendra Dasanayaka, a software engineer focused on fast, beautiful developer tooling. Learn about the project and its creator." />
+    <meta property="og:image" content="https://king-upe.github.io/DevDeck/ss.png" />
+    <meta property="og:image:width" content="1359" />
+    <meta property="og:image:height" content="717" />
+    <meta property="og:image:alt" content="The DevDeck desktop app showing auto-detected projects, script runner and built-in terminal" />
+
     <!-- Twitter -->
-    <meta property="twitter:card" content="summary" />
-    <meta property="twitter:url" content="https://king-upe.github.io/DevDeck/about.html" />
-    <meta property="twitter:title" content="About Developer | DevDeck" />
-    <meta property="twitter:description" content="Learn more about Upendra Dasanayaka, the developer behind DevDeck." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://king-upe.github.io/DevDeck/about.html" />
+    <meta name="twitter:title" content="About DevDeck &amp; Upendra Dasanayaka &mdash; The Developer Behind It" />
+    <meta name="twitter:description" content="DevDeck is built and maintained by Upendra Dasanayaka, a software engineer focused on fast, beautiful developer tooling. Learn about the project and its creator." />
+    <meta name="twitter:image" content="https://king-upe.github.io/DevDeck/ss.png" />
+    <meta name="twitter:image:alt" content="The DevDeck desktop app showing auto-detected projects, script runner and built-in terminal" />
+
+    <!-- Performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="./style.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div class="ambient-ball"></div>
@@ -50,7 +76,10 @@
     <main style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding-top: 5rem;">
       <section class="section text-center" style="padding: 1rem 0;">
         <div class="container" style="max-width: 800px;">
-          <h1 class="text-gradient" style="font-size: 3rem; margin-bottom: 2rem;">About the Developer</h1>
+          <nav class="breadcrumb" aria-label="Breadcrumb">
+          <a href="/DevDeck/">DevDeck</a> <span aria-hidden="true">/</span> <span aria-current="page">About DevDeck</span>
+        </nav>
+        <h1 class="text-gradient" style="font-size: 3rem; margin-bottom: 2rem;">About the Developer</h1>
           
           <div class="glass-card" style="margin-bottom: 2rem; display: flex; flex-direction: column; align-items: center;">
             <div style="width: 120px; height: 120px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--surface-light)); display: flex; align-items: center; justify-content: center; margin-bottom: 1.5rem; border: 2px solid var(--border-highlight);">
@@ -78,11 +107,22 @@
     </main>
 
     <!-- Footer -->
-    <footer style="padding: 1.5rem 0; border: none; background: transparent;">
-      <div class="container" style="display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.85rem; flex-wrap: wrap; gap: 1rem;">
+    <footer style="padding: 2.5rem 0 1.5rem 0; border: none; background: transparent;">
+      <div class="container">
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="/DevDeck/">DevDeck Home</a>
+          <a href="/DevDeck/download.html">Download DevDeck</a>
+          <a href="/DevDeck/help.html">Documentation</a>
+          <a href="/DevDeck/about.html">About the Developer</a>
+          <a href="https://github.com/KING-UPE/DevDeck" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+          <a href="https://github.com/KING-UPE/DevDeck/releases" target="_blank" rel="noopener noreferrer">Release Notes</a>
+          <a href="https://github.com/KING-UPE/DevDeck/issues" target="_blank" rel="noopener noreferrer">Report an Issue</a>
+        </nav>
+      </div>
+      <div class="container" style="display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.85rem; flex-wrap: wrap; gap: 1rem; margin-top: 1.5rem;">
         <div>&copy; DevDeck. Open Source Software (MIT).</div>
         <div>
-          Designed & Developed by <a href="https://upendradasanayaka.vercel.app/" target="_blank" rel="noopener noreferrer" style="color: var(--text-primary); text-decoration: none; font-weight: 500; transition: color 0.2s;">Upendra Dasanayaka</a>
+          Designed &amp; Developed by <a href="https://upendradasanayaka.vercel.app/" target="_blank" rel="noopener noreferrer" style="color: var(--text-primary); text-decoration: none; font-weight: 500; transition: color 0.2s;">Upendra Dasanayaka</a>
         </div>
       </div>
     </footer>
@@ -96,6 +136,70 @@
       });
     }
   });
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://king-upe.github.io/DevDeck/#website",
+      "url": "https://king-upe.github.io/DevDeck/",
+      "name": "DevDeck",
+      "alternateName": [
+        "DevDeck App",
+        "DevDeck Project Manager"
+      ],
+      "description": "DevDeck is a free, open-source desktop project manager, script runner and process manager for developers.",
+      "inLanguage": "en",
+      "publisher": {
+        "@id": "https://king-upe.github.io/DevDeck/#upendra"
+      }
+    },
+    {
+      "@type": "Person",
+      "@id": "https://king-upe.github.io/DevDeck/#upendra",
+      "name": "Upendra Dasanayaka",
+      "url": "https://upendradasanayaka.vercel.app/",
+      "jobTitle": "Software Engineer",
+      "sameAs": [
+        "https://github.com/KING-UPE",
+        "https://upendradasanayaka.vercel.app/"
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": "https://king-upe.github.io/DevDeck/about.html#breadcrumb",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "DevDeck",
+          "item": "https://king-upe.github.io/DevDeck/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "About the Developer",
+          "item": "https://king-upe.github.io/DevDeck/about.html"
+        }
+      ]
+    },
+    {
+      "@type": "AboutPage",
+      "@id": "https://king-upe.github.io/DevDeck/about.html#webpage",
+      "url": "https://king-upe.github.io/DevDeck/about.html",
+      "name": "About DevDeck & Upendra Dasanayaka",
+      "isPartOf": {
+        "@id": "https://king-upe.github.io/DevDeck/#website"
+      },
+      "mainEntity": {
+        "@id": "https://king-upe.github.io/DevDeck/#upendra"
+      },
+      "inLanguage": "en"
+    }
+  ]
+}
 </script>
 </body>
 </html>
