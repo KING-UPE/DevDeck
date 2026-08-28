@@ -1,0 +1,2 @@
+# IndexNow key file must be served byte-exact
+docs/*.txt -text
