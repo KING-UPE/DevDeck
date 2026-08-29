@@ -211,6 +211,12 @@ fn parse_projects(paths: Vec<PathBuf>) -> Vec<ProjectInfo> {
             proj.scripts.insert("php serve".to_string(), "php -S localhost:8000".to_string());
             types.push("PHP");
         }
+
+        if types.iter().any(|t| t.contains("PHP")) {
+            if !proj.scripts.contains_key("live server") {
+                proj.scripts.insert("live server".to_string(), "npx -y live-server".to_string());
+            }
+        }
         
         if dir.join("Gemfile").exists() {
             proj.scripts.insert("rails server".to_string(), "rails server".to_string());
