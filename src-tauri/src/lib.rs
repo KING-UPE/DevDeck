@@ -162,9 +162,54 @@ fn parse_projects(paths: Vec<PathBuf>) -> Vec<ProjectInfo> {
             types.push("Java (Maven)");
         }
         
-        if dir.join("composer.json").exists() {
-            proj.scripts.insert("php serve".to_string(), "php -S localhost:8000".to_string());
+        if let Ok(content) = fs::read_to_string(dir.join("composer.json")) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(n) = json.get("name").and_then(|n| n.as_str()) {
+                    let short_name = n.split('/').last().unwrap_or(n);
+                    proj.name = short_name.to_string();
+                }
+                if let Some(s) = json.get("scripts").and_then(|s| s.as_object()) {
+                    for (k, _v) in s {
+                        proj.scripts.insert(k.clone(), format!("composer run-script {}", k));
+                    }
+                }
+            }
+            if !proj.scripts.contains_key("composer install") {
+                proj.scripts.insert("composer install".to_string(), "composer install".to_string());
+            }
+            if !proj.scripts.contains_key("php serve") {
+                proj.scripts.insert("php serve".to_string(), "php -S localhost:8000".to_string());
+            }
             types.push("PHP (Composer)");
+        }
+
+        if dir.join("artisan").exists() {
+            proj.scripts.insert("artisan serve".to_string(), "php artisan serve".to_string());
+            proj.scripts.insert("artisan migrate".to_string(), "php artisan migrate".to_string());
+            if !types.iter().any(|t| t.contains("PHP")) {
+                types.push("Laravel (PHP)");
+            }
+        }
+
+        if dir.join("wp-config.php").exists() || dir.join("wp-content").exists() {
+            if !proj.scripts.contains_key("php serve") {
+                proj.scripts.insert("php serve".to_string(), "php -S localhost:8000".to_string());
+            }
+            if !types.iter().any(|t| t.contains("PHP")) {
+                types.push("WordPress (PHP)");
+            }
+        }
+
+        if dir.join("symfony.lock").exists() || dir.join("bin/console").exists() {
+            proj.scripts.insert("symfony serve".to_string(), "php bin/console server:run".to_string());
+            if !types.iter().any(|t| t.contains("PHP")) {
+                types.push("Symfony (PHP)");
+            }
+        }
+
+        if (dir.join("index.php").exists() || dir.join("server.php").exists()) && types.is_empty() {
+            proj.scripts.insert("php serve".to_string(), "php -S localhost:8000".to_string());
+            types.push("PHP");
         }
         
         if dir.join("Gemfile").exists() {
@@ -221,7 +266,7 @@ fn find_projects_recursive(dir: &Path, depth: u32, max_depth: u32, app: Option<&
             if path.is_dir() {
                 subdirs.push(path);
             } else {
-                let indicators = ["package.json", "Cargo.toml", "manage.py", "go.mod", "main.py", "app.py", "requirements.txt", "docker-compose.yml", "pom.xml", "composer.json", "Gemfile", "index.html"];
+                let indicators = ["package.json", "Cargo.toml", "manage.py", "go.mod", "main.py", "app.py", "requirements.txt", "docker-compose.yml", "pom.xml", "composer.json", "artisan", "wp-config.php", "index.php", "server.php", "symfony.lock", "Gemfile", "index.html"];
                 if indicators.contains(&file_name.as_str()) {
                     is_project = true;
                 }
