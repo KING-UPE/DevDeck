@@ -412,6 +412,21 @@ fn kill_process(pid: u32) -> Result<String, String> {
     Ok(format!("{} {}", stdout, stderr))
 }
 
+// Resolves the command's binary before spawning so that tools installed after
+// this app started (or living in XAMPP/Herd/Laragon) are reachable from `cmd`.
+#[cfg(target_os = "windows")]
+fn prepare_command_environment(command_str: &str) {
+    if let Some(binary) = command_str.trim().split_whitespace().next() {
+        let binary = binary.trim_matches('"').to_lowercase();
+        if !binary.is_empty() {
+            ensure_tool_available(&binary);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prepare_command_environment(_command_str: &str) {}
+
 #[tauri::command]
 fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: String, command_str: String) -> Result<(), String> {
     let script_name = format!("$ {}", command_str);
@@ -420,6 +435,7 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
     if state.active_processes.lock().unwrap().contains_key(&process_key) {
         return Err("Process is already running".to_string());
     }
+    prepare_command_environment(&command_str);
 
     let mut child = Command::new("cmd")
         .args(["/C", &command_str])
@@ -493,6 +509,7 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
     if state.active_processes.lock().unwrap().contains_key(&process_key) {
         return Err("Process is already running".to_string());
     }
+    prepare_command_environment(&script_cmd);
 
     let mut child = Command::new("cmd")
         .args(["/C", &script_cmd])
@@ -716,75 +733,512 @@ fn open_external_terminal(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn expand_env_placeholders(raw: &str) -> String {
+    let mut out = String::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) => {
+                let name = &after[..end];
+                match std::env::var(name) {
+                    Ok(val) => out.push_str(&val),
+                    Err(_) => {
+                        out.push('%');
+                        out.push_str(name);
+                        out.push('%');
+                    }
+                }
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('%');
+                rest = after;
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+// Winget writes new PATH entries into the registry. Processes that were already
+// running (like this app) keep the PATH they inherited at launch, which is why a
+// freshly installed tool still looks "missing" until a restart. Read it back.
+#[cfg(target_os = "windows")]
+fn read_registry_path(key: &str) -> Option<String> {
+    let output = Command::new("reg")
+        .args(["query", key, "/v", "Path"])
+        .apply_cross_platform_flags()
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if !trimmed.to_lowercase().starts_with("path") {
+            continue;
+        }
+        if let Some(idx) = trimmed.find("REG_") {
+            let after_type = &trimmed[idx..];
+            if let Some(gap) = after_type.find(char::is_whitespace) {
+                let value = after_type[gap..].trim();
+                if !value.is_empty() {
+                    return Some(expand_env_placeholders(value));
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn merge_path_entries(sources: Vec<String>) -> String {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut merged: Vec<String> = Vec::new();
+    for source in sources {
+        for entry in source.split(';') {
+            let entry = entry.trim().trim_matches('"');
+            if entry.is_empty() {
+                continue;
+            }
+            let key = entry.trim_end_matches('\\').to_lowercase();
+            if key.is_empty() {
+                continue;
+            }
+            if seen.insert(key) {
+                merged.push(entry.to_string());
+            }
+        }
+    }
+    merged.join(";")
+}
+
+#[cfg(target_os = "windows")]
+fn refresh_process_path() {
+    let mut sources: Vec<String> = Vec::new();
+    if let Ok(current) = std::env::var("PATH") {
+        sources.push(current);
+    }
+    if let Some(machine) =
+        read_registry_path("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")
+    {
+        sources.push(machine);
+    }
+    if let Some(user) = read_registry_path("HKCU\\Environment") {
+        sources.push(user);
+    }
+    let merged = merge_path_entries(sources);
+    if !merged.is_empty() {
+        std::env::set_var("PATH", merged);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn prepend_process_path(dir: &Path) {
+    let dir_str = dir.to_string_lossy().to_string();
+    let current = std::env::var("PATH").unwrap_or_default();
+    let merged = merge_path_entries(vec![dir_str, current]);
+    if !merged.is_empty() {
+        std::env::set_var("PATH", merged);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn tool_executables(tool: &str) -> Vec<&'static str> {
+    match tool {
+        "php" => vec!["php.exe"],
+        "composer" => vec!["composer.bat", "composer.exe", "composer.cmd"],
+        "mysql" => vec!["mysql.exe"],
+        "node" => vec!["node.exe"],
+        "npm" => vec!["npm.cmd", "npm.exe"],
+        "python" => vec!["python.exe"],
+        "git" => vec!["git.exe"],
+        "docker" => vec!["docker.exe"],
+        _ => vec![],
+    }
+}
+
+// Directories that commonly hold these tools but are not always on PATH.
+// XAMPP, Laragon and Herd all ship PHP without exporting it.
+#[cfg(target_os = "windows")]
+fn candidate_tool_dirs(tool: &str) -> Vec<PathBuf> {
+    let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let roaming = std::env::var("APPDATA").unwrap_or_default();
+    let program_files =
+        std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+    let mut dirs: Vec<PathBuf> = Vec::new();
+
+    if !local.is_empty() {
+        // Winget portable packages land here; PHP ships as a portable zip.
+        dirs.push(Path::new(&local).join("Microsoft\\WinGet\\Links"));
+        dirs.push(Path::new(&local).join("Microsoft\\WinGet\\Packages"));
+    }
+
+    match tool {
+        "php" => {
+            dirs.push(PathBuf::from("C:\\xampp\\php"));
+            dirs.push(PathBuf::from("C:\\laragon\\bin\\php"));
+            dirs.push(PathBuf::from("C:\\tools\\php"));
+            dirs.push(PathBuf::from("C:\\php"));
+            dirs.push(PathBuf::from("C:\\wamp64\\bin\\php"));
+            if !local.is_empty() {
+                dirs.push(Path::new(&local).join("Herd\\bin"));
+                dirs.push(Path::new(&local).join("Programs\\Herd\\resources\\bin"));
+            }
+        }
+        "composer" => {
+            dirs.push(PathBuf::from("C:\\xampp"));
+            dirs.push(PathBuf::from("C:\\ProgramData\\ComposerSetup\\bin"));
+            dirs.push(PathBuf::from("C:\\laragon\\bin\\composer"));
+            if !roaming.is_empty() {
+                dirs.push(Path::new(&roaming).join("Composer\\vendor\\bin"));
+            }
+            if !local.is_empty() {
+                dirs.push(Path::new(&local).join("Herd\\bin"));
+            }
+        }
+        "mysql" => {
+            dirs.push(PathBuf::from("C:\\xampp\\mysql\\bin"));
+            dirs.push(PathBuf::from("C:\\laragon\\bin\\mysql"));
+            dirs.push(Path::new(&program_files).join("MySQL"));
+        }
+        "node" | "npm" => {
+            dirs.push(Path::new(&program_files).join("nodejs"));
+            if !roaming.is_empty() {
+                dirs.push(Path::new(&roaming).join("npm"));
+            }
+        }
+        _ => {}
+    }
+    dirs
+}
+
+// Looks for the executable directly in `dir`, then one level down (Laragon,
+// Winget package folders and MySQL all nest a versioned directory), plus the
+// `bin` subfolder of each of those.
+#[cfg(target_os = "windows")]
+fn find_executable_dir(dir: &Path, executables: &[&str]) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        return None;
+    }
+    let direct_hit = |candidate: &Path| -> Option<PathBuf> {
+        for exe in executables {
+            if candidate.join(exe).is_file() {
+                return Some(candidate.to_path_buf());
+            }
+        }
+        None
+    };
+
+    if let Some(found) = direct_hit(dir) {
+        return Some(found);
+    }
+    if let Some(found) = direct_hit(&dir.join("bin")) {
+        return Some(found);
+    }
+
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let child = entry.path();
+        if !child.is_dir() {
+            continue;
+        }
+        if let Some(found) = direct_hit(&child) {
+            return Some(found);
+        }
+        if let Some(found) = direct_hit(&child.join("bin")) {
+            return Some(found);
+        }
+        // Winget nests one more level: Packages/<id>/<extracted-folder>/php.exe
+        if let Ok(grandchildren) = fs::read_dir(&child) {
+            for grandchild in grandchildren.flatten() {
+                let path = grandchild.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                if let Some(found) = direct_hit(&path) {
+                    return Some(found);
+                }
+                if let Some(found) = direct_hit(&path.join("bin")) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn tool_on_path(tool: &str) -> bool {
+    Command::new("where.exe")
+        .arg(tool)
+        .apply_cross_platform_flags()
+        .output()
+        .map(|out| out.status.success())
+        .unwrap_or(false)
+}
+
+// True when the tool can actually be launched by `run_script`. As a side effect
+// it repairs this process's PATH so the spawned `cmd /C ...` inherits it.
+#[cfg(target_os = "windows")]
+fn ensure_tool_available(tool: &str) -> bool {
+    if tool_on_path(tool) {
+        return true;
+    }
+    refresh_process_path();
+    if tool_on_path(tool) {
+        return true;
+    }
+    let executables = tool_executables(tool);
+    if executables.is_empty() {
+        return false;
+    }
+    for dir in candidate_tool_dirs(tool) {
+        if let Some(found) = find_executable_dir(&dir, &executables) {
+            prepend_process_path(&found);
+            return true;
+        }
+    }
+    false
+}
+
+// winget.exe is an App Execution Alias, so it is not always resolvable by name
+// from a GUI process.
+#[cfg(target_os = "windows")]
+fn winget_path() -> Option<PathBuf> {
+    if let Ok(out) = Command::new("where.exe")
+        .arg("winget.exe")
+        .apply_cross_platform_flags()
+        .output()
+    {
+        if out.status.success() {
+            if let Some(first) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                let path = PathBuf::from(first.trim());
+                if path.is_file() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let alias = Path::new(&local).join("Microsoft\\WindowsApps\\winget.exe");
+        if alias.is_file() {
+            return Some(alias);
+        }
+    }
+    if let Ok(program_files) = std::env::var("ProgramFiles") {
+        if let Ok(entries) = fs::read_dir(Path::new(&program_files).join("WindowsApps")) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if name.starts_with("microsoft.desktopappinstaller_") {
+                    let candidate = entry.path().join("winget.exe");
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn tidy_winget_output(raw: &str) -> String {
+    let cleaned: Vec<String> = raw
+        .lines()
+        .map(|line| {
+            line.chars()
+                .filter(|c| !c.is_control() && !('\u{2500}'..='\u{259F}').contains(c))
+                .collect::<String>()
+                .trim()
+                .to_string()
+        })
+        .filter(|line| !line.is_empty())
+        .collect();
+    if cleaned.len() > 12 {
+        cleaned[cleaned.len() - 12..].join("\n")
+    } else {
+        cleaned.join("\n")
+    }
+}
+
+#[cfg(target_os = "windows")]
+struct WingetFailure {
+    message: String,
+    cancelled: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn run_winget_install(winget: &Path, id: &str) -> Result<(), WingetFailure> {
+    let output = Command::new(winget)
+        .args([
+            "install",
+            "--id",
+            id,
+            "-e",
+            "--source",
+            "winget",
+            "--silent",
+            "--disable-interactivity",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+        ])
+        .apply_cross_platform_flags()
+        .output();
+
+    let output = match output {
+        Ok(out) => out,
+        Err(e) => {
+            return Err(WingetFailure {
+                message: format!("could not start winget ({})", e),
+                cancelled: false,
+            })
+        }
+    };
+
+    let mut combined = tidy_winget_output(&String::from_utf8_lossy(&output.stdout));
+    let stderr = tidy_winget_output(&String::from_utf8_lossy(&output.stderr));
+    if !stderr.is_empty() {
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(&stderr);
+    }
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let lowered = combined.to_lowercase();
+    // Winget reports an already-present package with a failure exit code.
+    if lowered.contains("already installed") || lowered.contains("no applicable upgrade") {
+        return Ok(());
+    }
+
+    let code = output.status.code().unwrap_or(-1);
+    let cancelled = lowered.contains("cancelled")
+        || lowered.contains("canceled")
+        || lowered.contains("elevation")
+        || lowered.contains("administrator");
+
+    let detail = if combined.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}", combined)
+    };
+
+    Err(WingetFailure {
+        message: format!("winget exited with 0x{:08X}{}", code as u32, detail),
+        cancelled,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn winget_candidates(tool: &str) -> Option<&'static [&'static str]> {
+    match tool {
+        "php" => Some(&[
+            "PHP.PHP.8.4",
+            "PHP.PHP.8.3",
+            "PHP.PHP.8.2",
+            "ApacheFriends.Xampp.8.2",
+        ]),
+        "composer" => Some(&["ApacheFriends.Xampp.8.2", "BeyondCode.Herd"]),
+        "mysql" => Some(&["Oracle.MySQL", "ApacheFriends.Xampp.8.2"]),
+        "node" | "npm" => Some(&["OpenJS.NodeJS"]),
+        "python" => Some(&["Python.Python.3.12", "Python.Python.3.11"]),
+        "docker" => Some(&["Docker.DockerDesktop"]),
+        "git" => Some(&["Git.Git"]),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install_dependency_blocking(tool: String) -> Result<String, String> {
+    let tool_lower = tool.trim().to_lowercase();
+
+    if ensure_tool_available(&tool_lower) {
+        return Ok(format!(
+            "{} was already installed and is now available.",
+            tool_lower
+        ));
+    }
+
+    let candidates = winget_candidates(&tool_lower)
+        .ok_or_else(|| format!("No automatic Winget installer is configured for '{}'.", tool))?;
+
+    let winget = winget_path().ok_or_else(|| {
+        "Windows Package Manager (winget) was not found. Install \"App Installer\" from the Microsoft Store, then try again."
+            .to_string()
+    })?;
+
+    // The portable PHP build links against the VC++ runtime; without it php.exe
+    // installs fine but refuses to start.
+    if tool_lower == "php" {
+        let _ = run_winget_install(&winget, "Microsoft.VCRedist.2015+.x64");
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    for &id in candidates {
+        match run_winget_install(&winget, id) {
+            Ok(()) => {
+                if ensure_tool_available(&tool_lower) {
+                    return Ok(format!("Installed {} via Winget ({}).", tool_lower, id));
+                }
+                failures.push(format!(
+                    "{}: installed, but no '{}' executable was found afterwards",
+                    id, tool_lower
+                ));
+            }
+            Err(failure) => {
+                failures.push(format!("{}: {}", id, failure.message));
+                if failure.cancelled {
+                    break;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Could not auto-install {}.\n\n{}",
+        tool_lower,
+        failures.join("\n\n")
+    ))
+}
+
 #[tauri::command]
 fn check_system_dependency(tool: String) -> Result<bool, String> {
     let tool_clean = tool.trim().to_lowercase();
     #[cfg(target_os = "windows")]
     {
-        let output = Command::new("where.exe")
-            .arg(&tool_clean)
-            .apply_cross_platform_flags()
-            .output();
-        if let Ok(out) = output {
-            return Ok(out.status.success());
-        }
+        Ok(ensure_tool_available(&tool_clean))
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let output = Command::new("which")
-            .arg(&tool_clean)
-            .output();
+        let output = Command::new("which").arg(&tool_clean).output();
         if let Ok(out) = output {
             return Ok(out.status.success());
         }
+        Ok(false)
     }
-    Ok(false)
 }
 
 #[tauri::command]
-fn auto_install_dependency(tool: String) -> Result<String, String> {
-    let tool_lower = tool.to_lowercase();
+async fn auto_install_dependency(tool: String) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
-        let winget_ids: &[&str] = match tool_lower.as_str() {
-            "php" => &["PHP.PHP.8.4", "PHP.PHP.8.3", "PHP.PHP.8.2", "BeyondCode.Herd", "ApacheFriends.Xampp.8.2"],
-            "composer" => &["BeyondCode.Herd", "ApacheFriends.Xampp.8.2"],
-            "mysql" => &["Oracle.MySQL", "ApacheFriends.Xampp.8.2"],
-            "node" | "npm" => &["OpenJS.NodeJS"],
-            "python" => &["Python.Python.3.12", "Python.Python.3.11"],
-            "docker" => &["Docker.DockerDesktop"],
-            "git" => &["Git.Git"],
-            _ => return Err(format!("No automatic winget installer configured for '{}'", tool)),
-        };
-
-        let mut last_error = String::new();
-        for &id in winget_ids {
-            let output = Command::new("winget")
-                .args([
-                    "install",
-                    "--id",
-                    id,
-                    "-e",
-                    "--accept-source-agreements",
-                    "--accept-package-agreements",
-                ])
-                .apply_cross_platform_flags()
-                .output();
-
-            if let Ok(out) = output {
-                if out.status.success() {
-                    return Ok(format!("Successfully installed {} via Winget ({})", tool, id));
-                } else {
-                    let err = String::from_utf8_lossy(&out.stdout).to_string();
-                    last_error = err;
-                }
-            }
-        }
-
-        Err(format!("Winget could not auto-install {}. Error details:\n{}", tool, last_error))
+        // winget downloads can take minutes; keep them off the UI thread.
+        tauri::async_runtime::spawn_blocking(move || install_dependency_blocking(tool))
+            .await
+            .map_err(|e| format!("Installer task failed to run: {}", e))?
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = tool;
         Err("Auto-installer currently supports Windows via Winget.".to_string())
     }
 }
