@@ -717,6 +717,133 @@ fn open_external_terminal(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn check_system_dependency(tool: String) -> Result<bool, String> {
+    let tool_clean = tool.trim().to_lowercase();
+    #[cfg(target_os = "windows")]
+    {
+        let output = Command::new("where.exe")
+            .arg(&tool_clean)
+            .apply_cross_platform_flags()
+            .output();
+        if let Ok(out) = output {
+            return Ok(out.status.success());
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let output = Command::new("which")
+            .arg(&tool_clean)
+            .output();
+        if let Ok(out) = output {
+            return Ok(out.status.success());
+        }
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+fn auto_install_dependency(tool: String) -> Result<String, String> {
+    let tool_lower = tool.to_lowercase();
+    #[cfg(target_os = "windows")]
+    {
+        let winget_id = match tool_lower.as_str() {
+            "php" => "PHP.PHP",
+            "composer" => "Composer.Composer",
+            "mysql" => "Oracle.MySQL",
+            "node" | "npm" => "OpenJS.NodeJS",
+            "python" => "Python.Python.3.12",
+            "docker" => "Docker.DockerDesktop",
+            "git" => "Git.Git",
+            _ => return Err(format!("No automatic winget installer configured for '{}'", tool)),
+        };
+
+        let output = Command::new("winget")
+            .args([
+                "install",
+                "--id",
+                winget_id,
+                "-e",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ])
+            .apply_cross_platform_flags()
+            .output()
+            .map_err(|e| format!("Failed to launch Winget: {}", e))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if output.status.success() {
+            Ok(format!("Successfully installed {}", tool))
+        } else {
+            Err(format!("Winget install failed: {}\n{}", stdout, stderr))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Auto-installer currently supports Windows via Winget.".to_string())
+    }
+}
+
+#[tauri::command]
+fn auto_setup_database(project_path: String) -> Result<String, String> {
+    let path = Path::new(&project_path);
+    let mut actions = Vec::new();
+
+    // 1. Check .env vs .env.example
+    let env_file = path.join(".env");
+    let env_example = path.join(".env.example");
+    if !env_file.exists() && env_example.exists() {
+        if let Ok(_) = fs::copy(&env_example, &env_file) {
+            actions.push("Copied .env.example to .env".to_string());
+        }
+    }
+
+    // 2. Read .env content if exists
+    let mut db_type = String::new();
+    if env_file.exists() {
+        if let Ok(content) = fs::read_to_string(&env_file) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("DB_CONNECTION=") {
+                    db_type = trimmed.trim_start_matches("DB_CONNECTION=").trim_matches('"').trim_matches('\'').to_string();
+                }
+            }
+        }
+    }
+
+    // 3. Handle SQLite auto-creation
+    if db_type == "sqlite" || path.join("database").join("database.sqlite").exists() || path.join("database.sqlite").exists() {
+        let db_dir = path.join("database");
+        if !db_dir.exists() {
+            let _ = fs::create_dir_all(&db_dir);
+        }
+        let sqlite_file = db_dir.join("database.sqlite");
+        if !sqlite_file.exists() {
+            if let Ok(_) = fs::File::create(&sqlite_file) {
+                actions.push("Created database/database.sqlite".to_string());
+            }
+        }
+    }
+
+    // 4. Handle MySQL / Docker Compose check
+    let has_docker = path.join("docker-compose.yml").exists() || path.join("docker-compose.yaml").exists();
+    if db_type == "mysql" {
+        if has_docker {
+            actions.push("MySQL database configured via Docker Compose".to_string());
+        } else {
+            actions.push("MySQL database connection configured in .env".to_string());
+        }
+    }
+
+    if actions.is_empty() {
+        Ok("Database configuration verified.".to_string())
+    } else {
+        Ok(actions.join("\n"))
+    }
+}
+
+#[tauri::command]
 fn log_error(err: String) {
     eprintln!("[FRONTEND ERROR] {}", err);
 }
@@ -799,7 +926,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, log_error
+            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

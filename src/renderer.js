@@ -974,8 +974,100 @@ function renderProjects() {
 
 }
 
+// Dependency Auto-Installer Modal Elements
+const dependencyModal = document.getElementById('dependency-modal');
+const depModalTitle = document.getElementById('dep-modal-title');
+const depModalMessage = document.getElementById('dep-modal-message');
+const depModalStatus = document.getElementById('dep-modal-status');
+const depModalStatusText = document.getElementById('dep-modal-status-text');
+const depModalInstallBtn = document.getElementById('dep-modal-install-btn');
+const depModalLiveServerBtn = document.getElementById('dep-modal-liveserver-btn');
+const depModalCancelBtn = document.getElementById('dep-modal-cancel-btn');
+
+function showDependencyModal(toolName, scriptName, projectPath, scriptCmd) {
+    return new Promise((resolve) => {
+        if (!dependencyModal) return resolve('cancel');
+        depModalTitle.textContent = `Missing ${toolName.toUpperCase()} Environment`;
+        depModalMessage.textContent = `DevDeck detected that ${toolName.toUpperCase()} is required to run "${scriptName}", but it was not found on your system. Would you like DevDeck to install ${toolName.toUpperCase()} automatically via Windows Package Manager (Winget)?`;
+        
+        depModalStatus.style.display = 'none';
+        depModalInstallBtn.style.display = 'flex';
+        depModalLiveServerBtn.style.display = 'flex';
+        depModalCancelBtn.style.display = 'flex';
+
+        depModalInstallBtn.onclick = async () => {
+            depModalStatus.style.display = 'block';
+            depModalStatusText.textContent = `Installing ${toolName.toUpperCase()} via Winget... Please wait`;
+            depModalInstallBtn.style.display = 'none';
+            depModalLiveServerBtn.style.display = 'none';
+            depModalCancelBtn.style.display = 'none';
+            try {
+                const res = await window.__TAURI__.core.invoke('auto_install_dependency', { tool: toolName });
+                dependencyModal.style.display = 'none';
+                await customAlert(`Successfully installed ${toolName.toUpperCase()}!\n\n${res}`);
+                resolve('install');
+            } catch (err) {
+                dependencyModal.style.display = 'none';
+                await customAlert(`Installation Error:\n${err}`);
+                resolve('cancel');
+            }
+        };
+
+        depModalLiveServerBtn.onclick = () => {
+            dependencyModal.style.display = 'none';
+            resolve('liveserver');
+        };
+
+        depModalCancelBtn.onclick = () => {
+            dependencyModal.style.display = 'none';
+            resolve('cancel');
+        };
+
+        dependencyModal.style.display = 'flex';
+    });
+}
+
+async function executeScriptWithCheck(projectPath, scriptName, scriptCmd) {
+    const processKey = `${projectPath}:${scriptName}`;
+    if (runningProcesses.has(processKey)) return;
+
+    let primaryBinary = '';
+    const firstWord = scriptCmd.trim().split(/\s+/)[0].toLowerCase();
+    if (['php', 'composer', 'python', 'cargo', 'go', 'rails', 'node'].includes(firstWord)) {
+        primaryBinary = firstWord;
+    }
+
+    if (primaryBinary) {
+        try {
+            const isInstalled = await window.__TAURI__.core.invoke('check_system_dependency', { tool: primaryBinary });
+            if (!isInstalled) {
+                const userChoice = await showDependencyModal(primaryBinary, scriptName, projectPath, scriptCmd);
+                if (userChoice === 'liveserver') {
+                    scriptCmd = 'npx -y live-server';
+                } else if (userChoice !== 'install') {
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error("Dependency check failed:", e);
+        }
+    }
+
+    window.__TAURI__.core.invoke('run_script', { 
+        projectPath: projectPath, 
+        scriptName: scriptName,
+        scriptCmd: scriptCmd
+    });
+    runningProcesses.add(processKey);
+    processLogs[processKey] = processLogs[processKey] || [];
+    activeTerminalTab = processKey;
+    renderScripts();
+    renderTerminalTabs();
+}
+
 function selectProject(proj) {
     activeProject = proj;
+    window.__TAURI__.core.invoke('auto_setup_database', { projectPath: proj.path }).catch(() => {});
     const customName = customProjectNames[proj.path] || proj.name;
     activeProjectName.innerHTML = `${customName} <span class="badge" style="font-size:0.8rem; background:var(--primary); color:white; padding:2px 6px; border-radius:12px; margin-left:8px; vertical-align:middle;">${proj.project_type || 'Unknown'}</span>`;
     activeProjectPath.textContent = proj.path;
@@ -1040,18 +1132,7 @@ function renderScripts() {
             ${scriptName}
         `;
         runBtn.onclick = () => {
-            if (!isRunning) {
-                window.__TAURI__.core.invoke('run_script', { 
-                    projectPath: projectPath, 
-                    scriptName: scriptName,
-                    scriptCmd: scriptCmd
-                });
-                runningProcesses.add(processKey);
-                processLogs[processKey] = processLogs[processKey] || [];
-                activeTerminalTab = processKey;
-                renderScripts();
-                renderTerminalTabs();
-            }
+            executeScriptWithCheck(projectPath, scriptName, scriptCmd);
         };
 
         container.appendChild(runBtn);
