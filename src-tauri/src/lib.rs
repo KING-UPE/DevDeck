@@ -746,38 +746,42 @@ fn auto_install_dependency(tool: String) -> Result<String, String> {
     let tool_lower = tool.to_lowercase();
     #[cfg(target_os = "windows")]
     {
-        let winget_id = match tool_lower.as_str() {
-            "php" => "PHP.PHP",
-            "composer" => "Composer.Composer",
-            "mysql" => "Oracle.MySQL",
-            "node" | "npm" => "OpenJS.NodeJS",
-            "python" => "Python.Python.3.12",
-            "docker" => "Docker.DockerDesktop",
-            "git" => "Git.Git",
+        let winget_ids: &[&str] = match tool_lower.as_str() {
+            "php" => &["PHP.PHP.8.4", "PHP.PHP.8.3", "PHP.PHP.8.2", "BeyondCode.Herd", "ApacheFriends.Xampp.8.2"],
+            "composer" => &["BeyondCode.Herd", "ApacheFriends.Xampp.8.2"],
+            "mysql" => &["Oracle.MySQL", "ApacheFriends.Xampp.8.2"],
+            "node" | "npm" => &["OpenJS.NodeJS"],
+            "python" => &["Python.Python.3.12", "Python.Python.3.11"],
+            "docker" => &["Docker.DockerDesktop"],
+            "git" => &["Git.Git"],
             _ => return Err(format!("No automatic winget installer configured for '{}'", tool)),
         };
 
-        let output = Command::new("winget")
-            .args([
-                "install",
-                "--id",
-                winget_id,
-                "-e",
-                "--accept-source-agreements",
-                "--accept-package-agreements",
-            ])
-            .apply_cross_platform_flags()
-            .output()
-            .map_err(|e| format!("Failed to launch Winget: {}", e))?;
+        let mut last_error = String::new();
+        for &id in winget_ids {
+            let output = Command::new("winget")
+                .args([
+                    "install",
+                    "--id",
+                    id,
+                    "-e",
+                    "--accept-source-agreements",
+                    "--accept-package-agreements",
+                ])
+                .apply_cross_platform_flags()
+                .output();
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        if output.status.success() {
-            Ok(format!("Successfully installed {}", tool))
-        } else {
-            Err(format!("Winget install failed: {}\n{}", stdout, stderr))
+            if let Ok(out) = output {
+                if out.status.success() {
+                    return Ok(format!("Successfully installed {} via Winget ({})", tool, id));
+                } else {
+                    let err = String::from_utf8_lossy(&out.stdout).to_string();
+                    last_error = err;
+                }
+            }
         }
+
+        Err(format!("Winget could not auto-install {}. Error details:\n{}", tool, last_error))
     }
     #[cfg(not(target_os = "windows"))]
     {
