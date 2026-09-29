@@ -267,6 +267,29 @@
 
                     <button id="remote-toggle-btn" class="btn btn-primary btn-full">Turn on gateway</button>
 
+
+                    <div id="account-section" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border);">
+                        <label class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">Account</label>
+                        <p class="text-muted" style="font-size: 0.78rem; margin: 0.3rem 0 0.6rem;">
+                            Required to sign in from another network. Projects stay private unless you share them.
+                        </p>
+                        <div id="account-none">
+                            <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem;">
+                                <input id="acct-user" placeholder="Username" autocomplete="off" style="flex: 1; font-size: 0.82rem; padding: 0.45rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                                <input id="acct-pass" type="password" placeholder="Password (8+ chars)" autocomplete="new-password" style="flex: 1; font-size: 0.82rem; padding: 0.45rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                            </div>
+                            <button id="acct-create-btn" class="btn btn-secondary btn-full" style="font-size: 0.82rem;">Create account</button>
+                        </div>
+                        <div id="account-has" style="display: none;">
+                            <div style="font-size: 0.82rem; margin-bottom: 0.5rem;">
+                                Signed in as <strong id="acct-name"></strong>
+                            </div>
+                            <div style="display: flex; gap: 0.4rem;">
+                                <button id="acct-change-btn" class="btn btn-secondary" style="flex: 1; font-size: 0.78rem;">Change password</button>
+                                <button id="acct-revoke-btn" class="btn btn-secondary" style="flex: 1; font-size: 0.78rem;">Sign out all devices</button>
+                            </div>
+                        </div>
+                    </div>
                     <div id="tunnel-section" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border);">
                         <label class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">Remote access</label>
                         <p class="text-muted" style="font-size: 0.78rem; margin: 0.3rem 0 0.6rem;">

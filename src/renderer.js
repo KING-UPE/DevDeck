@@ -1495,6 +1495,7 @@ projectTypeFilter.addEventListener('change', renderProjects);
         }
 
         await refreshTunnel(info);
+        await refreshAccount();
     }
 
     async function refreshPreviews(info) {
@@ -1502,13 +1503,34 @@ projectTypeFilter.addEventListener('change', renderProjects);
         try {
             const res = await fetch(info.lan_url + '/api/previews');
             const list = await res.json();
+            let vis = {};
+            try { vis = await invoke('project_visibility'); } catch (e) {}
+
             previews.innerHTML = list.length
-                ? list.map(p =>
-                    '<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);">' +
-                    '<code style="font-size:0.78rem;">' + p.url + '</code>' +
-                    '<div style="font-size:0.72rem;opacity:0.7;">' + p.key + '</div></div>'
-                  ).join('')
+                ? list.map(p => {
+                    const isPublic = vis[p.key] === 'public';
+                    const safeKey = p.key.replace(/"/g, '&quot;');
+                    return '<div style="padding:0.35rem 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:0.5rem;">' +
+                      '<div style="flex:1;min-width:0;">' +
+                        '<code style="font-size:0.78rem;">' + p.url + '</code>' +
+                        '<div style="font-size:0.72rem;opacity:0.7;">' + p.key + '</div>' +
+                      '</div>' +
+                      '<button class="btn btn-secondary vis-toggle" data-key="' + safeKey + '" ' +
+                        'data-public="' + isPublic + '" style="font-size:0.68rem;padding:0.2rem 0.5rem;white-space:nowrap;">' +
+                        (isPublic ? 'Public' : 'Private') +
+                      '</button></div>';
+                  }).join('')
                 : 'No servers running yet. Start one and it appears here.';
+
+            previews.querySelectorAll('.vis-toggle').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    await invoke('set_project_visibility', {
+                        projectKey: btn.dataset.key,
+                        public: btn.dataset.public !== 'true'
+                    });
+                    await refresh();
+                });
+            });
         } catch (e) {
             previews.textContent = 'Could not reach the gateway.';
         }
@@ -1591,6 +1613,59 @@ projectTypeFilter.addEventListener('change', renderProjects);
             navigator.clipboard.writeText(tunUrl.value);
             tunCopy.textContent = 'Copied';
             setTimeout(() => { tunCopy.textContent = 'Copy'; }, 1200);
+        });
+    }
+
+
+    // --- local account + per-project visibility ---------------------------
+    const acctNone   = document.getElementById('account-none');
+    const acctHas    = document.getElementById('account-has');
+    const acctName   = document.getElementById('acct-name');
+    const acctUser   = document.getElementById('acct-user');
+    const acctPass   = document.getElementById('acct-pass');
+    const acctCreate = document.getElementById('acct-create-btn');
+    const acctChange = document.getElementById('acct-change-btn');
+    const acctRevoke = document.getElementById('acct-revoke-btn');
+
+    async function refreshAccount() {
+        if (!acctNone) return;
+        let st = { has_account: false };
+        try { st = await invoke('auth_status'); } catch (e) {}
+        acctNone.style.display = st.has_account ? 'none' : 'block';
+        acctHas.style.display  = st.has_account ? 'block' : 'none';
+        if (st.has_account) acctName.textContent = st.username || '';
+    }
+
+    async function saveAccount(username, password) {
+        try {
+            await invoke('auth_set_account', { username: username, password: password });
+            acctUser.value = '';
+            acctPass.value = '';
+            await refresh();
+        } catch (e) {
+            customAlert(String(e));
+        }
+    }
+
+    if (acctCreate) {
+        acctCreate.addEventListener('click', () => {
+            saveAccount(acctUser.value.trim(), acctPass.value);
+        });
+    }
+
+    if (acctChange) {
+        acctChange.addEventListener('click', async () => {
+            const st = await invoke('auth_status');
+            const pw = await customPrompt('New password (at least 8 characters):');
+            // Changing the password signs every paired phone out.
+            if (pw) await saveAccount(st.username, pw);
+        });
+    }
+
+    if (acctRevoke) {
+        acctRevoke.addEventListener('click', async () => {
+            await invoke('auth_revoke_sessions');
+            customAlert('All paired devices have been signed out.');
         });
     }
 
