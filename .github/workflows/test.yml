@@ -1,0 +1,120 @@
+name: "Tests"
+
+# Runs on every push and pull request. Until this existed the suite only ran on
+# a developer's machine, so a change that broke something could still be tagged
+# and released.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rust:
+    name: Rust (desktop)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri links against the system webview even for `cargo test`, so the
+      # dev packages are needed despite no app being built here.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: test-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Run tests
+        working-directory: src-tauri
+        run: cargo test --lib --verbose
+
+      # Warnings are reported but do not fail the build: the project has
+      # pre-existing ones, and failing on them here would block every change
+      # until they are all cleared.
+      - name: Clippy
+        working-directory: src-tauri
+        continue-on-error: true
+        run: cargo clippy --lib -- -W clippy::all
+
+  worker:
+    name: Rendezvous worker
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # No install step: the tests deliberately run against a plain object
+      # rather than a Workers runtime, so they need nothing from npm.
+      - name: Run tests
+        working-directory: worker
+        run: node --test test/*.test.mjs
+
+  frontend:
+    name: Frontend syntax
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # These files are loaded straight into a webview with no build step, so a
+      # syntax error ships as a blank window rather than a failed compile.
+      - name: Parse the desktop and mobile bundles
+        run: |
+          node --check src/renderer.js
+          node --check src/main.js
+          node --check mobile/src/app.js
+          node --check worker/src/index.js
+
+  android:
+    name: Android build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            mobile/src-tauri/target
+          key: test-android-${{ hashFiles('mobile/src-tauri/Cargo.lock') }}
+
+      # Compiling for the phone catches breakage the desktop build cannot: a
+      # dependency with no Android backend fails only on this target.
+      - name: Compile the remote app for Android
+        working-directory: mobile/src-tauri
+        run: cargo check --target aarch64-linux-android
