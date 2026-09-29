@@ -4,6 +4,7 @@ mod gateway;
 mod tunnel;
 mod livereload;
 mod ports;
+mod processes;
 mod rendezvous;
 
 use std::process::{Command, Stdio};
@@ -62,6 +63,8 @@ struct AppState {
     tunnels: Arc<Mutex<tunnel::TunnelManager>>,
     /// SQLite store: workspaces, projects, settings, account, sessions.
     db: Arc<Mutex<db::Db>>,
+    /// Recent output and restart details, readable by the gateway.
+    processes: processes::Registry,
 }
 
 fn update_tray_menu(app: &tauri::AppHandle) {
@@ -469,16 +472,19 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
     
     state.active_processes.lock().unwrap().insert(process_key.clone(), child);
     let detected_ports = state.detected_ports.clone();
+    state.processes.register(&process_key, &project_path, &script_name, &command_str);
     let _ = app.emit("process-started", serde_json::json!({ "processKey": process_key }));
     
     let pk1 = process_key.clone();
     let app1 = app.clone();
     let ports1 = detected_ports.clone();
+    let reg1 = state.processes.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(l) = line {
                 note_detected_port(&app1, &ports1, &pk1, &l);
+                reg1.append(&pk1, "stdout", &l);
                 let _ = app1.emit("process-output", serde_json::json!({ "processKey": pk1, "type": "stdout", "data": format!("{}\n", l) }));
             }
         }
@@ -487,11 +493,13 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
     let pk2 = process_key.clone();
     let app2 = app.clone();
     let ports2 = detected_ports.clone();
+    let reg2 = state.processes.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(l) = line {
                 note_detected_port(&app2, &ports2, &pk2, &l);
+                reg2.append(&pk2, "stderr", &l);
                 let _ = app2.emit("process-output", serde_json::json!({ "processKey": pk2, "type": "stderr", "data": format!("{}\n", l) }));
             }
         }
@@ -590,12 +598,23 @@ fn unpublish_preview(app: &AppHandle, process_key: &str) {
 }
 
 #[tauri::command]
-fn gateway_start(state: State<AppState>) -> Result<gateway::GatewayInfo, String> {
+fn gateway_start(
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<gateway::GatewayInfo, String> {
     let mut guard = state.gateway.lock().unwrap();
     if let Some(gw) = guard.as_ref() {
         return Ok(gw.info());
     }
-    let gw = gateway::Gateway::start(state.db.clone())?;
+    let controls = {
+        let stop_app = app.clone();
+        let restart_app = app.clone();
+        gateway::Controls {
+            stop: Arc::new(move |key: String| halt_process(&stop_app, &key)),
+            restart: Arc::new(move |key: String| restart_process(&restart_app, &key)),
+        }
+    };
+    let gw = gateway::Gateway::start(state.db.clone(), state.processes.clone(), controls)?;
     let info = gw.info();
     *guard = Some(gw);
     drop(guard);
@@ -859,7 +878,31 @@ fn get_detected_ports(state: State<AppState>) -> HashMap<String, u16> {
 }
 
 #[tauri::command]
-fn run_script(app: AppHandle, state: State<AppState>, project_path: String, script_name: String, script_cmd: String) -> Result<(), String> {
+fn run_script(
+    app: AppHandle,
+    state: State<AppState>,
+    project_path: String,
+    script_name: String,
+    script_cmd: String,
+) -> Result<(), String> {
+    launch_tracked(&app, &state, &project_path, &script_name, &script_cmd)
+}
+
+/// Spawn a script and wire up its output, tray entry and exit handling.
+///
+/// Extracted from `run_script` so a restart requested from the phone takes the
+/// identical path rather than a parallel copy that can drift.
+fn launch_tracked(
+    app: &AppHandle,
+    state: &AppState,
+    project_path: &str,
+    script_name: &str,
+    script_cmd: &str,
+) -> Result<(), String> {
+    let app = app.clone();
+    let project_path = project_path.to_string();
+    let script_name = script_name.to_string();
+    let script_cmd = script_cmd.to_string();
     let process_key = format!("{}:{}", project_path, script_name);
     
     if state.active_processes.lock().unwrap().contains_key(&process_key) {
@@ -882,16 +925,19 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
     
     state.active_processes.lock().unwrap().insert(process_key.clone(), child);
     let detected_ports = state.detected_ports.clone();
+    state.processes.register(&process_key, &project_path, &script_name, &script_cmd);
     let _ = app.emit("process-started", serde_json::json!({ "processKey": process_key }));
     
     let pk1 = process_key.clone();
     let app1 = app.clone();
     let ports1 = detected_ports.clone();
+    let reg1 = state.processes.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(l) = line {
                 note_detected_port(&app1, &ports1, &pk1, &l);
+                reg1.append(&pk1, "stdout", &l);
                 let _ = app1.emit("process-output", serde_json::json!({ "processKey": pk1, "type": "stdout", "data": format!("{}\n", l) }));
             }
         }
@@ -900,11 +946,13 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
     let pk2 = process_key.clone();
     let app2 = app.clone();
     let ports2 = detected_ports.clone();
+    let reg2 = state.processes.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(l) = line {
                 note_detected_port(&app2, &ports2, &pk2, &l);
+                reg2.append(&pk2, "stderr", &l);
                 let _ = app2.emit("process-output", serde_json::json!({ "processKey": pk2, "type": "stderr", "data": format!("{}\n", l) }));
             }
         }
@@ -941,6 +989,42 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
 }
 
 
+
+/// Stop a process by key, from anywhere (desktop UI or the phone).
+pub(crate) fn halt_process(app: &AppHandle, key: &str) {
+    let state = app.state::<AppState>();
+    let child = state.active_processes.lock().unwrap().remove(key);
+    if let Some(child) = child {
+        let pid = child.id();
+        #[cfg(target_os = "windows")]
+        let _ = Command::new("C:\\Windows\\System32\\taskkill.exe")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .apply_cross_platform_flags()
+            .output();
+        #[cfg(not(target_os = "windows"))]
+        let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+    }
+    update_tray_menu(app);
+}
+
+/// Restart a process using the command it was originally started with.
+///
+/// Returns an error rather than guessing when DevDeck has never seen the
+/// process start, since it has no command to repeat.
+pub(crate) fn restart_process(app: &AppHandle, key: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (path, script, cmd) = state
+        .processes
+        .command_for(key)
+        .ok_or("DevDeck did not start this process, so it cannot restart it")?;
+
+    halt_process(app, key);
+    // taskkill returns before the child is reaped; give the port a moment to
+    // free or the new server will fail to bind.
+    thread::sleep(std::time::Duration::from_millis(600));
+
+    launch_tracked(app, &state, &path, &script, &cmd)
+}
 
 #[tauri::command]
 fn stop_script(app: AppHandle, state: State<AppState>, process_key: String) {
@@ -1688,6 +1772,7 @@ pub fn run() {
             db: Arc::new(Mutex::new(
                 db::Db::open().expect("could not open the DevDeck database"),
             )),
+            processes: processes::Registry::default(),
         })
         .setup(|app| {
             let _tray = tauri::tray::TrayIconBuilder::with_id("main")

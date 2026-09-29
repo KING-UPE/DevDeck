@@ -18,6 +18,7 @@
 use crate::auth::{self, Visibility};
 use crate::db::Db;
 use crate::livereload::{self, Reloader};
+use crate::processes::Registry;
 use axum::{
     body::Body,
     extract::{Query, Request, State},
@@ -38,6 +39,17 @@ use tokio::sync::oneshot;
 pub const CONTROL_PORT: u16 = 7420;
 const PREVIEW_PORT_BASE: u16 = 7421;
 const SESSION_COOKIE: &str = "devdeck_session";
+
+/// How the gateway asks the app to stop or restart a process.
+///
+/// Callbacks rather than a Tauri handle: the gateway has no business knowing
+/// what kind of application hosts it, and linking the desktop runtime into this
+/// module also breaks the test binary.
+#[derive(Clone)]
+pub struct Controls {
+    pub stop: Arc<dyn Fn(String) + Send + Sync>,
+    pub restart: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
+}
 
 /// A single project's preview server.
 struct Preview {
@@ -67,6 +79,9 @@ pub struct Gateway {
 #[derive(Clone)]
 struct ControlState {
     token: String,
+    processes: Registry,
+    /// Absent in tests, where there is no app to drive.
+    controls: Option<Controls>,
     previews: Arc<Mutex<HashMap<String, Preview>>>,
     lan_ip: Option<IpAddr>,
     db: Arc<Mutex<Db>>,
@@ -120,14 +135,26 @@ fn lan_ip() -> Option<IpAddr> {
 impl Gateway {
     /// Bind the control plane and return a handle. Preview planes start later,
     /// as ports are detected.
-    pub fn start(db: Arc<Mutex<Db>>) -> Result<Self, String> {
-        Self::start_on(IpAddr::from([0, 0, 0, 0]), CONTROL_PORT, db)
+    pub fn start(
+        db: Arc<Mutex<Db>>,
+        processes: Registry,
+        controls: Controls,
+    ) -> Result<Self, String> {
+        Self::start_on(
+            IpAddr::from([0, 0, 0, 0]),
+            CONTROL_PORT,
+            db,
+            processes,
+            Some(controls),
+        )
     }
 
     pub fn start_on(
         bind: IpAddr,
         control_port: u16,
         db: Arc<Mutex<Db>>,
+        processes: Registry,
+        controls: Option<Controls>,
     ) -> Result<Self, String> {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -144,6 +171,8 @@ impl Gateway {
 
         let state = ControlState {
             token: token.clone(),
+            processes: processes.clone(),
+            controls,
             previews: previews.clone(),
             lan_ip: ip,
             db: db.clone(),
@@ -154,6 +183,10 @@ impl Gateway {
         // that 401s would break installability.
         let protected = Router::new()
             .route("/api/previews", get(list_previews))
+            .route("/api/logs", get(read_logs))
+            .route("/api/logs/poll", get(poll_logs))
+            .route("/api/process/stop", axum::routing::post(stop_process))
+            .route("/api/process/restart", axum::routing::post(restart_process))
             .layer(middleware::from_fn_with_state(state.clone(), require_session));
 
         let app = Router::new()
@@ -350,6 +383,89 @@ pub fn qr_svg(data: &str) -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------- handlers
+
+/// A process key carries drive letters and colons, so it travels as a query
+/// parameter rather than a path segment that would need escaping.
+#[derive(serde::Deserialize)]
+struct LogQuery {
+    key: String,
+    /// Return only lines newer than this sequence number.
+    after: Option<u64>,
+}
+
+async fn read_logs(State(st): State<ControlState>, Query(q): Query<LogQuery>) -> Response {
+    Json(st.processes.since(&q.key, q.after)).into_response()
+}
+
+/// Wait for new output, then return it.
+///
+/// Long-polling rather than a WebSocket: it survives a phone changing networks,
+/// and needs nothing on the page beyond `fetch`.
+async fn poll_logs(State(st): State<ControlState>, Query(q): Query<LogQuery>) -> Response {
+    // Anything already buffered is returned immediately.
+    let existing = st.processes.since(&q.key, q.after);
+    if !existing.is_empty() {
+        return Json(existing).into_response();
+    }
+
+    let mut rx = st.processes.subscribe();
+    let deadline = tokio::time::Duration::from_secs(25);
+    let wanted = q.key.clone();
+
+    let woke = tokio::time::timeout(deadline, async {
+        loop {
+            match rx.recv().await {
+                Ok(key) if key == wanted => return true,
+                // Lagging means output was missed, which is still news.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => return true,
+                Err(_) => return false,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+
+    if woke {
+        Json(st.processes.since(&q.key, q.after)).into_response()
+    } else {
+        Json(Vec::<crate::processes::LogLine>::new()).into_response()
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct KeyQuery {
+    key: String,
+}
+
+async fn stop_process(State(st): State<ControlState>, Query(q): Query<KeyQuery>) -> Response {
+    let Some(c) = st.controls.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not available").into_response();
+    };
+    let key = q.key.clone();
+    // Killing a process tree blocks, so it must not run on the async runtime.
+    let _ = tokio::task::spawn_blocking(move || (c.stop)(key)).await;
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+async fn restart_process(State(st): State<ControlState>, Query(q): Query<KeyQuery>) -> Response {
+    let Some(c) = st.controls.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not available").into_response();
+    };
+    let key = q.key.clone();
+    let result = tokio::task::spawn_blocking(move || (c.restart)(key)).await;
+
+    match result {
+        Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 
 /// Append the live-reload client to HTML the project serves.
 ///
@@ -611,6 +727,8 @@ mod tests {
         out
     }
 
+    const CRLF: &str = "\r\n";
+
     /// Byte-level fetch, for responses that are not valid UTF-8 (PNG icons).
     fn get_bytes(port: u16, path: &str) -> Vec<u8> {
         let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
@@ -663,6 +781,8 @@ mod tests {
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             0,
             Arc::new(Mutex::new(Db::open_in_memory().unwrap())),
+            Registry::default(),
+            None,
         )
         .unwrap()
     }
@@ -755,7 +875,14 @@ mod tests {
     fn gateway_with_account() -> (Gateway, Arc<Mutex<Db>>) {
         let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
         auth::set_account(&db.lock().unwrap(), "upe", "correct-horse").unwrap();
-        let gw = Gateway::start_on(IpAddr::V4(Ipv4Addr::LOCALHOST), 0, db.clone()).unwrap();
+        let gw = Gateway::start_on(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            0,
+            db.clone(),
+            Registry::default(),
+            None,
+        )
+        .unwrap();
         (gw, db)
     }
 
@@ -867,6 +994,69 @@ mod tests {
         let resp = get(port, "/site.css");
         assert!(resp.contains("body { color: red }"));
         assert!(!resp.contains(crate::livereload::RELOAD_PATH), "injected into CSS");
+    }
+
+/// A gateway sharing one registry with the test, so output can be staged.
+    fn gateway_with_logs() -> (Gateway, Registry) {
+        let reg = Registry::default();
+        let gw = Gateway::start_on(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            0,
+            Arc::new(Mutex::new(Db::open_in_memory().unwrap())),
+            reg.clone(),
+            None,
+        )
+        .unwrap();
+        (gw, reg)
+    }
+
+    #[test]
+    fn serves_a_process_log_tail() {
+        let (gw, reg) = gateway_with_logs();
+        reg.register("proj:dev", "D:/proj", "dev", "npm run dev");
+        reg.append("proj:dev", "stderr", "Error: build failed");
+
+        let body = get(gw.control_port, "/api/logs?key=proj%3Adev");
+        assert!(body.contains("200 OK"), "logs not served: {body}");
+        assert!(body.contains("build failed"), "log line missing: {body}");
+        assert!(body.contains("stderr"), "stream not reported: {body}");
+    }
+
+    #[test]
+    fn a_log_tail_can_resume_from_a_sequence() {
+        let (gw, reg) = gateway_with_logs();
+        reg.register("proj:dev", "D:/proj", "dev", "npm run dev");
+        for i in 0..4 {
+            reg.append("proj:dev", "stdout", &format!("line {i}"));
+        }
+
+        let body = get(gw.control_port, "/api/logs?key=proj%3Adev&after=2");
+        assert!(body.contains("line 3"), "newest line missing: {body}");
+        assert!(!body.contains("line 0"), "already-seen line resent: {body}");
+    }
+
+    #[test]
+    fn logs_for_an_unknown_process_are_empty_not_an_error() {
+        let (gw, _reg) = gateway_with_logs();
+        let body = get(gw.control_port, "/api/logs?key=ghost%3Adev");
+        assert!(body.contains("200 OK"));
+        assert!(body.contains("[]"), "expected an empty list: {body}");
+    }
+
+    #[test]
+    fn process_control_is_refused_when_no_app_is_attached() {
+        // The test gateway has no controls, standing in for a gateway whose
+        // host has gone away; it must refuse rather than panic.
+        let (gw, _reg) = gateway_with_logs();
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, gw.control_port)).unwrap();
+        let req = format!(
+            "POST /api/process/stop?key=proj%3Adev HTTP/1.1{}Host: 127.0.0.1{}Content-Length: 0{}Connection: close{}{}",
+            CRLF, CRLF, CRLF, CRLF, CRLF
+        );
+        s.write_all(req.as_bytes()).unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        assert!(out.contains("503"), "expected 503, got: {out}");
     }
 
     #[test]
