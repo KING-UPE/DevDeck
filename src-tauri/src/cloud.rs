@@ -421,8 +421,6 @@ mod tests {
         Db::open_in_memory().unwrap()
     }
 
-    }
-
     #[test]
     fn ships_with_a_project_configured() {
         let d = db();
