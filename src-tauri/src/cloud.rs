@@ -256,6 +256,18 @@ pub fn signup_outcome(body: &str) -> String {
     if parsed.get("access_token").and_then(|v| v.as_str()).is_some() {
         return "Account created. You are signed in.".into();
     }
+    // Checked before the confirmation case, because a real response for an
+    // address that already exists carries BOTH an empty identities array and a
+    // confirmation_sent_at - so testing confirmation first reports a duplicate
+    // signup as a brand new account.
+    if parsed
+        .get("identities")
+        .and_then(|v| v.as_array())
+        .map(|a| a.is_empty())
+        .unwrap_or(false)
+    {
+        return "That email already has an account. Sign in instead.".into();
+    }
     if parsed
         .get("confirmation_sent_at")
         .or_else(|| parsed.get("user").and_then(|u| u.get("confirmation_sent_at")))
@@ -264,16 +276,6 @@ pub fn signup_outcome(body: &str) -> String {
     {
         return "Account created. Check your email and click the confirmation link, then sign in."
             .into();
-    }
-    // A signup for an address that already exists returns an identity-less user
-    // rather than an error, so it is not treated as success.
-    if parsed
-        .get("identities")
-        .and_then(|v| v.as_array())
-        .map(|a| a.is_empty())
-        .unwrap_or(false)
-    {
-        return "That email already has an account. Sign in instead.".into();
     }
     "Account created. Check your email if a confirmation was sent, then sign in.".into()
 }
@@ -419,6 +421,20 @@ mod tests {
         Db::open_in_memory().unwrap()
     }
 
+#[test]
+    #[ignore]
+    fn TEMP_live_signup_path() {
+        // Uses an address that already exists, so no account is created.
+        let d = db();
+        let cfg = config(&d).expect("no config");
+        println!("URL = {}", cfg.url);
+        println!("KEY len = {}", cfg.anon_key.len());
+        match sign_up(&cfg, "upendrauniversity@gmail.com", "placeholder-not-used") {
+            Ok(msg) => println!("OK  -> {msg}"),
+            Err(e) => println!("ERR -> {e}"),
+        }
+    }
+
     #[test]
     fn ships_with_a_project_configured() {
         let d = db();
@@ -510,6 +526,16 @@ mod tests {
         // Confirmation off: signed in straight away.
         let immediate = signup_outcome(r#"{"access_token":"jwt","user":{"id":"u1"}}"#);
         assert!(immediate.contains("signed in"), "got: {immediate}");
+    }
+
+#[test]
+    fn a_duplicate_signup_is_caught_even_though_it_looks_confirmed() {
+        // The exact shape a live project returns for an address that exists:
+        // an empty identities array alongside a confirmation timestamp.
+        let out = signup_outcome(
+            r#"{"id":"u1","email":"a@b.com","confirmation_sent_at":"2026-09-29T12:54:32Z","identities":[]}"#,
+        );
+        assert!(out.contains("already has an account"), "reported as new: {out}");
     }
 
     #[test]
