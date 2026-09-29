@@ -130,6 +130,10 @@ impl Gateway {
 
         let app = Router::new()
             .route("/", get(index))
+            .route("/manifest.webmanifest", get(manifest))
+            .route("/sw.js", get(service_worker))
+            .route("/icon-256.png", get(icon_256))
+            .route("/icon-512.png", get(icon_512))
             .route("/api/previews", get(list_previews))
             .route("/api/health", get(|| async { "ok" }))
             .with_state(state);
@@ -140,6 +144,13 @@ impl Gateway {
         let listener = runtime
             .block_on(tokio::net::TcpListener::bind(addr))
             .map_err(|e| format!("port {control_port} unavailable: {e}"))?;
+
+        // Port 0 means "pick one for me", so read back what was actually bound;
+        // storing the requested value would report 0 to the UI.
+        let control_port = listener
+            .local_addr()
+            .map(|a| a.port())
+            .unwrap_or(control_port);
 
         runtime.spawn(async move {
             let _ = axum::serve(listener, app)
@@ -282,6 +293,41 @@ async fn index(State(st): State<ControlState>, Query(q): Query<AuthQuery>) -> Re
     Html(include_str!("../ui/remote.html")).into_response()
 }
 
+/// Static assets for the installable web app. Embedded in the binary rather
+/// than read from disk so a packaged build has no external file dependencies.
+async fn manifest() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/manifest+json")],
+        include_str!("../ui/manifest.webmanifest"),
+    )
+}
+
+async fn service_worker() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript"),
+            // Must not be cached by the browser, or a stale worker pins an old
+            // shell forever.
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("../ui/sw.js"),
+    )
+}
+
+async fn icon_256() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/png")],
+        include_bytes!("../icons/128x128@2x.png").as_slice(),
+    )
+}
+
+async fn icon_512() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/png")],
+        include_bytes!("../icons/icon.png").as_slice(),
+    )
+}
+
 async fn list_previews(State(st): State<ControlState>) -> Json<Vec<PreviewEntry>> {
     let host = st
         .lan_ip
@@ -344,6 +390,18 @@ mod tests {
         out
     }
 
+    /// Byte-level fetch, for responses that are not valid UTF-8 (PNG icons).
+    fn get_bytes(port: u16, path: &str) -> Vec<u8> {
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        s.write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").as_bytes(),
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        let _ = s.read_to_end(&mut out);
+        out
+    }
+
     fn test_gateway() -> Gateway {
         // Loopback + port 0 keeps the test off the wildcard address, which would
         // otherwise raise a Windows Firewall prompt on every run.
@@ -383,6 +441,55 @@ mod tests {
         gw.add_preview("a:dev", spawn_upstream("x")).unwrap();
         gw.remove_preview("a:dev");
         assert!(gw.previews.lock().unwrap().is_empty());
+    }
+
+#[test]
+    fn serves_the_installable_web_app() {
+        let gw = test_gateway();
+        let port = gw.control_port;
+
+        let shell = get(port, "/");
+        assert!(shell.contains("200 OK"), "shell not served: {shell}");
+        assert!(shell.contains("manifest.webmanifest"), "shell missing manifest link");
+
+        let manifest = get(port, "/manifest.webmanifest");
+        assert!(manifest.contains("application/manifest+json"), "wrong manifest type");
+        assert!(manifest.contains("\"display\": \"standalone\""), "not installable");
+
+        let sw = get(port, "/sw.js");
+        assert!(sw.contains("text/javascript"), "wrong sw type");
+        assert!(sw.contains("no-cache"), "sw must not be cached");
+    }
+
+    #[test]
+    fn serves_icons_for_the_home_screen() {
+        let gw = test_gateway();
+        for path in ["/icon-256.png", "/icon-512.png"] {
+            let raw = get_bytes(gw.control_port, path);
+            let head = String::from_utf8_lossy(&raw[..raw.len().min(220)]).to_string();
+            assert!(head.contains("200 OK"), "{path} not served: {head}");
+            assert!(head.contains("image/png"), "{path} wrong content type: {head}");
+            // PNG magic proves the bytes survived the proxy intact.
+            assert!(
+                raw.windows(3).any(|w| w == b"PNG"),
+                "{path} body is not a PNG"
+            );
+        }
+    }
+
+    #[test]
+    fn reports_the_port_it_actually_bound() {
+        let gw = test_gateway();
+        assert_ne!(gw.control_port, 0, "ephemeral bind must report the real port");
+        assert!(gw.info().running);
+    }
+
+    #[test]
+    fn previews_endpoint_lists_registered_projects() {
+        let gw = test_gateway();
+        gw.add_preview("proj:dev", spawn_upstream("x")).unwrap();
+        let body = get(gw.control_port, "/api/previews");
+        assert!(body.contains("proj:dev"), "preview missing from list: {body}");
     }
 
     #[test]
