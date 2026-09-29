@@ -22,7 +22,13 @@ machine.** They are absolute paths that mean nothing on another computer, and
 they leak client names, employers and unreleased work. The cloud's only job is
 answering *"where is this account's PC right now"*.
 
-## Setup
+## Already configured
+
+Builds ship pointing at a Supabase project, so cloud sign-in works out of the
+box with no setup. The steps below are only needed to run **your own** project
+instead - for a fork, or to keep your users' accounts separate.
+
+## Setup (optional)
 
 You need a free Supabase account. No card, no paid plan.
 
