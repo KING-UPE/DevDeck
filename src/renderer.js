@@ -566,17 +566,6 @@ if (closeSecondarySidebarBtn) {
 // Initial state
 if (secondarySidebar) secondarySidebar.classList.add('collapsed');
 
-// Pre-populate with scratch directory as a default workspace if empty
-const defaultWorkspace = "C:\\Users\\upend\\.gemini\\antigravity\\scratch";
-// Must run *after* bootstrapState(): an empty pre-load list would look like a
-// first run and overwrite the user's real workspaces with this one path.
-function seedDefaultWorkspace() {
-    if (workspaces.length === 0) {
-        workspaces.push(defaultWorkspace);
-        saveState();
-    }
-}
-
 function saveState() {
     persist('workspaces', workspaces);
     persist('hiddenProjects', hiddenProjects);
@@ -588,7 +577,6 @@ function saveState() {
 // Nothing may render until the database has answered, or the first paint
 // would show an empty sidebar and then snap to the real workspaces.
 bootstrapState().then(() => {
-    seedDefaultWorkspace();
     maybeShowTour();
     updateMainIdeButton();
     renderWorkspaces();
@@ -786,6 +774,23 @@ scanBtn.addEventListener('click', scanAllWorkspaces);
 // Functions
 function renderWorkspaces() {
     workspaceListEl.innerHTML = '';
+
+    // Without this the sidebar is simply blank on a fresh install, with no
+    // hint that "Add Workspace" is the next step.
+    if (!workspaces.length) {
+        workspaceListEl.innerHTML =
+            '<div style="padding: 1.25rem 0.75rem; text-align: center; color: var(--text-muted);">' +
+              '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+                'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5;margin-bottom:0.5rem;">' +
+                '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' +
+              '<div style="font-size: 0.82rem; font-weight: 600; color: var(--text-primary);">No workspaces yet</div>' +
+              '<div style="font-size: 0.75rem; margin-top: 0.25rem; line-height: 1.5;">' +
+                'Click <strong>Add Workspace</strong> above and pick the folder your projects live in.' +
+              '</div>' +
+            '</div>';
+        return;
+    }
+
     workspaces.forEach(ws => {
         const div = document.createElement('div');
         div.className = 'workspace-item';
