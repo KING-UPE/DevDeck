@@ -703,6 +703,62 @@ fn tunnel_status(state: State<AppState>) -> HashMap<u16, String> {
     state.tunnels.lock().unwrap().all()
 }
 
+#[derive(serde::Serialize)]
+struct AuthStatus {
+    has_account: bool,
+    username: Option<String>,
+}
+
+/// Whether an account exists, for the desktop Remote panel.
+#[tauri::command]
+fn auth_status(state: State<AppState>) -> AuthStatus {
+    let auth = state.auth.lock().unwrap();
+    AuthStatus {
+        has_account: auth.has_account(),
+        username: auth.username().map(str::to_string),
+    }
+}
+
+/// Create or replace the account used to sign in from a phone.
+///
+/// Hashing is deliberately slow, so this runs off the UI thread.
+#[tauri::command]
+async fn auth_set_account(
+    state: State<'_, AppState>,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    let auth = state.auth.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        auth.lock().unwrap().set_account(&username, &password)
+    })
+    .await
+    .map_err(|e| format!("account task failed: {e}"))?
+}
+
+/// Sign every paired device out.
+#[tauri::command]
+fn auth_revoke_sessions(state: State<AppState>) {
+    state.auth.lock().unwrap().revoke_all_sessions();
+}
+
+/// Per-project visibility, keyed by process key.
+#[tauri::command]
+fn project_visibility(state: State<AppState>) -> HashMap<String, auth::Visibility> {
+    state.auth.lock().unwrap().all_visibility()
+}
+
+/// Mark a project public (viewable without signing in) or private.
+#[tauri::command]
+fn set_project_visibility(state: State<AppState>, project_key: String, public: bool) {
+    let v = if public {
+        auth::Visibility::Public
+    } else {
+        auth::Visibility::Private
+    };
+    state.auth.lock().unwrap().set_visibility(&project_key, v);
+}
+
 #[tauri::command]
 fn gateway_status(state: State<AppState>) -> gateway::GatewayInfo {
     match state.gateway.lock().unwrap().as_ref() {
@@ -1619,7 +1675,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

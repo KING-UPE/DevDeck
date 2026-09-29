@@ -143,6 +143,29 @@
   }
   #ptr.on { height: 30px; }
 
+/* ---------- login ---------- */
+  #login-screen { z-index: 30; transform: translateX(0); display: none; }
+  body.needs-login #login-screen { display: flex; }
+  #login-screen .wrap {
+    margin: auto; width: 100%; max-width: 340px; padding: 24px;
+    display: flex; flex-direction: column; gap: 12px; text-align: center;
+  }
+  #login-screen h2 { margin: 0 0 4px; font-size: 1.15rem; letter-spacing: -.01em; }
+  #login-screen p { margin: 0 0 14px; font-size: .84rem; color: var(--dim); }
+  .field {
+    width: 100%; padding: 13px 14px; font: inherit; font-size: .92rem;
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 11px;
+  }
+  .field:focus { outline: none; border-color: var(--border-hi); }
+  .primary {
+    width: 100%; padding: 13px; margin-top: 4px;
+    background: var(--accent); color: #fff; border: 0; border-radius: 11px;
+    font: 600 .92rem/1 inherit; cursor: pointer;
+  }
+  .primary:disabled { opacity: .55; }
+  .err { color: #f87171; font-size: .82rem; min-height: 1.1em; margin: 0; }
+
   /* ---------- preview ---------- */
   #frame { flex: 1; width: 100%; border: 0; background: #fff; }
   #frame-fallback {
@@ -160,6 +183,20 @@
 </style>
 </head>
 <body>
+
+<!-- ============ login ============ -->
+<section class="screen" id="login-screen">
+  <div class="wrap">
+    <h2>Sign in to DevDeck</h2>
+    <p>Use the account you created on your PC.</p>
+    <input class="field" id="lg-user" type="text" autocomplete="username"
+           autocapitalize="none" autocorrect="off" placeholder="Username" />
+    <input class="field" id="lg-pass" type="password" autocomplete="current-password"
+           placeholder="Password" />
+    <p class="err" id="lg-err"></p>
+    <button class="primary" id="lg-go">Sign in</button>
+  </div>
+</section>
 
 <!-- ============ projects ============ -->
 <section class="screen" id="list-screen">
@@ -273,6 +310,7 @@
   async function load() {
     try {
       var r = await fetch('/api/previews', { cache: 'no-store' });
+      if (r.status === 401) { document.body.classList.add('needs-login'); return; }
       if (!r.ok) throw new Error(r.status);
       render(await r.json());
       setConnected(true);
@@ -356,8 +394,59 @@
     pulling = false;
   }, { passive: true });
 
+/* ---------- session ---------- */
+  async function checkSession() {
+    try {
+      var r = await fetch('/api/session', { cache: 'no-store' });
+      var info = await r.json();
+      /* With no account configured the gateway is LAN-convenience only, so
+         there is nothing to sign in to. */
+      var needs = info.has_account && !info.authenticated;
+      document.body.classList.toggle('needs-login', needs);
+      return !needs;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  document.getElementById('lg-go').addEventListener('click', async function () {
+    var btn = this;
+    var err = document.getElementById('lg-err');
+    var user = document.getElementById('lg-user').value.trim();
+    var pass = document.getElementById('lg-pass').value;
+    if (!user || !pass) { err.textContent = 'Enter your username and password.'; return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Signing in...';
+    err.textContent = '';
+    try {
+      var r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password: pass })
+      });
+      if (!r.ok) {
+        var body = await r.json().catch(function () { return {}; });
+        throw new Error(body.error || 'Incorrect username or password');
+      }
+      document.getElementById('lg-pass').value = '';
+      document.body.classList.remove('needs-login');
+      lastSig = '';
+      load();
+    } catch (e) {
+      err.textContent = e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Sign in';
+    }
+  });
+
+  document.getElementById('lg-pass').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('lg-go').click();
+  });
+
   /* ---------- lifecycle ---------- */
-  load();
+  checkSession().then(load);
   var timer = setInterval(load, 3000);
   document.addEventListener('visibilitychange', function () {
     /* Polling a sleeping phone just burns battery. */
