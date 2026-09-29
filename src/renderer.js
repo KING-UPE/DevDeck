@@ -1148,6 +1148,8 @@ function selectProject(proj) {
     scriptsSection.style.display = 'block';
     renameProjectBtn.style.display = 'block';
     openExternalTermBtn.style.display = 'block';
+    // Sharing is per project, so the control only exists once one is selected.
+    if (window.__devdeckShare) window.__devdeckShare.show(true);
     if (ideLauncherContainer) {
         ideLauncherContainer.style.display = 'block';
         updateMainIdeButton();
@@ -1520,269 +1522,339 @@ closeHiddenModalBtn.addEventListener('click', () => {
 projectSearch.addEventListener('input', renderProjects);
 projectTypeFilter.addEventListener('change', renderProjects);
 
-// === MOBILE REMOTE ===
-// One panel, one account, one primary action. Identity lives in the header;
-// everything advanced sits behind the settings gear.
-(function initMobileRemote() {
+// === ACCOUNT, SETTINGS AND SHARING ===
+// Identity sits in the sidebar, device linking lives in Settings, and each
+// project is shared from its own header rather than from a central panel.
+(function initRemote() {
     const $ = (id) => document.getElementById(id);
 
-    const openBtn   = $('remote-btn');
-    const modal     = $('remote-modal');
-    if (!openBtn || !modal) return;
+    const accountModal  = $('account-modal');
+    const settingsModal = $('settings-modal');
+    if (!accountModal || !settingsModal) return;
 
-    const mainPane  = $('remote-main');
-    const setPane   = $('remote-settings');
-    const qrBox     = $('remote-qr');
-    const urlInput  = $('remote-url');
-    const dot       = $('remote-dot');
-    const stateEl   = $('remote-state');
-    const previews  = $('remote-previews');
-    const reachLbl  = $('reach-label');
-    const reachBtn  = $('reach-btn');
-    const acctChip  = $('acct-chip');
-    const acctLabel = $('acct-label');
-    const acctAvi   = $('acct-avatar');
-
-    let pollTimer = null;
+    let signedIn = false;
+    let gatewayInfo = null;
     let tunnelUrl = null;
+    let previewRows = [];
+    let settingsTimer = null;
 
-    function esc(s) {
-        return String(s).replace(/[&<>"]/g, (c) =>
-            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    }
-
-    function showSettings(on) {
-        mainPane.style.display = on ? 'none' : 'block';
-        setPane.style.display = on ? 'block' : 'none';
-    }
-
-    // --- account -----------------------------------------------------------
-    async function refreshAccount() {
-        let st = { configured: false, signed_in: false };
+    // ---------------------------------------------------------------- chip
+    async function refreshAccountChip() {
+        let st = { signed_in: false };
         try { st = await invoke('cloud_status'); } catch (e) {}
+        signedIn = !!st.signed_in;
 
         const email = st.email || '';
-        acctLabel.textContent = st.signed_in ? (email.split('@')[0] || 'Account') : 'Sign in';
-        acctAvi.textContent = st.signed_in ? (email[0] || '?').toUpperCase() : '?';
-        acctAvi.style.background = st.signed_in ? 'var(--accent)' : 'var(--surface-light)';
+        const letter = (email[0] || 'U').toUpperCase();
+        $('account-name').textContent = signedIn ? (email.split('@')[0] || 'Account') : 'Sign in';
+        $('account-sub').textContent = signedIn ? email : 'Not signed in';
 
-        $('set-signed-out').style.display = st.signed_in ? 'none' : 'block';
-        $('set-signed-in').style.display = st.signed_in ? 'block' : 'none';
-        if (st.signed_in) $('cloud-email-label').textContent = email;
+        const avatar = $('account-avatar');
+        if (signedIn) {
+            avatar.textContent = letter;
+            avatar.style.background = 'var(--accent)';
+            avatar.style.color = '#fff';
+            avatar.style.fontWeight = '700';
+            avatar.style.fontSize = '0.78rem';
+        }
         return st;
     }
 
-    // --- gateway + reach ---------------------------------------------------
-    async function refresh() {
-        let info;
-        try { info = await invoke('gateway_status'); } catch (e) { return; }
+    // ------------------------------------------------------- account modal
+    let authMode = 'signin';
 
-        const on = !!info.running;
-        dot.style.background = on ? 'var(--success, #22c55e)' : 'var(--text-muted)';
-        stateEl.textContent = on ? 'Ready' : 'Off';
-        $('remote-toggle-btn').textContent = on ? 'Turn off' : 'Turn on';
+    function setAuthMode(mode) {
+        authMode = mode;
+        const isSignup = mode === 'signup';
+        for (const t of document.querySelectorAll('.auth-tab')) {
+            const on = t.dataset.tab === mode;
+            t.style.background = on ? 'var(--accent)' : 'transparent';
+            t.style.color = on ? '#fff' : 'var(--text-muted)';
+            t.style.fontWeight = on ? '600' : '400';
+        }
+        // Re-entering the password only guards account creation; asking for it
+        // at sign-in would be noise.
+        $('au-pass2').style.display = isSignup ? 'block' : 'none';
+        $('au-forgot').style.display = isSignup ? 'none' : 'inline';
+        $('au-submit').textContent = isSignup ? 'Create account' : 'Sign in';
+        $('au-msg').textContent = '';
+    }
 
-        // The tunnel address is the shareable one when it exists, because it
-        // works from any network; the LAN address only works at home.
+    async function openAccount() {
+        const st = await refreshAccountChip();
+        $('account-title').textContent = st.signed_in ? 'Account' : 'Sign in to DevDeck';
+        $('auth-panes').style.display = st.signed_in ? 'none' : 'block';
+        $('account-signed-in').style.display = st.signed_in ? 'block' : 'none';
+        if (st.signed_in) {
+            $('account-signed-email').textContent = st.email || '';
+            $('account-big-avatar').textContent = ((st.email || 'U')[0] || 'U').toUpperCase();
+        } else {
+            setAuthMode('signin');
+        }
+        accountModal.style.display = 'flex';
+    }
+
+    function say(text, tone) {
+        const el = $('au-msg');
+        el.textContent = text;
+        el.style.color = tone === 'bad' ? '#f87171'
+                       : tone === 'good' ? 'var(--success, #22c55e)'
+                       : 'var(--text-muted)';
+    }
+
+    $('account-chip').addEventListener('click', openAccount);
+    $('close-account-modal').addEventListener('click', () => { accountModal.style.display = 'none'; });
+    accountModal.addEventListener('click', (e) => { if (e.target === accountModal) accountModal.style.display = 'none'; });
+    for (const t of document.querySelectorAll('.auth-tab')) {
+        t.addEventListener('click', () => setAuthMode(t.dataset.tab));
+    }
+
+    $('au-eye').addEventListener('click', () => {
+        const f = $('au-pass');
+        const showing = f.type === 'text';
+        f.type = showing ? 'password' : 'text';
+        $('au-eye').title = showing ? 'Show password' : 'Hide password';
+    });
+
+    $('au-submit').addEventListener('click', async function () {
+        const email = $('au-email').value.trim();
+        const pass = $('au-pass').value;
+        if (!email || !pass) { say('Enter your email and password.', 'bad'); return; }
+
+        if (authMode === 'signup') {
+            if (pass.length < 8) { say('Use at least 8 characters.', 'bad'); return; }
+            if (pass !== $('au-pass2').value) { say('The two passwords do not match.', 'bad'); return; }
+        }
+
+        const original = this.textContent;
+        this.disabled = true;
+        this.textContent = authMode === 'signup' ? 'Creating…' : 'Signing in…';
+        say('');
+        try {
+            if (authMode === 'signup') {
+                const msg = await invoke('cloud_sign_up', { email: email, password: pass });
+                // Stay on this screen and switch to sign-in, rather than parking
+                // the user on a "waiting for confirmation" dead end.
+                setAuthMode('signin');
+                $('au-pass').value = pass;
+                say(msg, 'good');
+            } else {
+                await invoke('cloud_sign_in', { email: email, password: pass });
+                $('au-pass').value = '';
+                $('au-pass2').value = '';
+                await openAccount();
+            }
+        } catch (e) {
+            say(String(e), 'bad');
+        } finally {
+            this.disabled = false;
+            this.textContent = original;
+        }
+    });
+
+    $('au-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('au-submit').click(); });
+    $('au-pass2').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('au-submit').click(); });
+
+    $('au-forgot').addEventListener('click', async function () {
+        const email = $('au-email').value.trim();
+        if (!email) { say('Enter your email first, then press this.', 'bad'); return; }
+        this.disabled = true;
+        try { say(await invoke('cloud_reset_password', { email: email })); }
+        catch (e) { say(String(e), 'bad'); }
+        finally { this.disabled = false; }
+    });
+
+    $('au-signout').addEventListener('click', async () => {
+        await invoke('cloud_sign_out');
+        await openAccount();
+    });
+
+    // ------------------------------------------------------ settings modal
+    async function refreshSettings() {
+        try { gatewayInfo = await invoke('gateway_status'); } catch (e) { return; }
+
+        const on = !!gatewayInfo.running;
+        $('link-dot').style.background = on ? 'var(--success, #22c55e)' : 'var(--text-muted)';
+        $('link-state').textContent = on ? 'Ready to link' : 'Sharing is off';
+        $('gateway-toggle').textContent = on ? 'Turn off' : 'Turn on';
+
         let tunnels = {};
         try { tunnels = await invoke('tunnel_status'); } catch (e) {}
-        tunnelUrl = (info.control_port && tunnels[info.control_port]) || null;
+        tunnelUrl = (gatewayInfo.control_port && tunnels[gatewayInfo.control_port]) || null;
 
-        urlInput.value = tunnelUrl || info.lan_url || '';
-        reachLbl.textContent = tunnelUrl ? 'Reachable from anywhere' : 'Works on this Wi‑Fi only';
-        reachBtn.textContent = tunnelUrl ? 'Stop' : 'Use anywhere';
+        $('link-url').value = tunnelUrl || gatewayInfo.lan_url || '';
+        $('reach-label').textContent = tunnelUrl ? 'Reachable anywhere' : 'This Wi‑Fi only';
+        $('reach-btn').textContent = tunnelUrl ? 'Stop' : 'Use anywhere';
 
         if (on) {
             try {
-                qrBox.innerHTML = await invoke('gateway_pair_qr');
-                const svg = qrBox.querySelector('svg');
+                $('link-qr').innerHTML = await invoke('gateway_pair_qr');
+                const svg = $('link-qr').querySelector('svg');
                 if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
-            } catch (e) { qrBox.textContent = String(e); }
+            } catch (e) { $('link-qr').textContent = String(e); }
         } else {
-            qrBox.textContent = 'Gateway is off';
+            $('link-qr').textContent = 'Sharing is off';
         }
 
-        await renderPreviews();
-        await refreshAccount();
+        try { previewRows = await invoke('gateway_previews'); } catch (e) {}
+        await refreshAccountChip();
     }
 
-    // --- projects, each with its own share control -------------------------
-    async function renderPreviews() {
-        let rows = [];
-        // Straight from the backend: fetching the gateway's own HTTP API from
-        // this webview is a cross-origin request and gets blocked.
-        try { rows = await invoke('gateway_previews'); } catch (e) {}
-
-        if (!rows.length) {
-            previews.innerHTML =
-                '<p class="text-muted" style="font-size:0.82rem;margin:0;">Start a project and it appears here.</p>';
-            return;
-        }
-
-        previews.innerHTML = rows.map((r) => {
-            const isPublic = r.visibility === 'public';
-            return '<div style="display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0;border-bottom:1px solid var(--border);">' +
-                '<div style="flex:1;min-width:0;">' +
-                  '<div style="font-size:0.86rem;font-weight:600;">' + esc(r.name) + '</div>' +
-                  '<div class="text-muted" style="font-size:0.72rem;">port ' + r.port + '</div>' +
-                '</div>' +
-                '<button class="btn btn-secondary vis-toggle" data-key="' + esc(r.key) + '" data-public="' + isPublic + '" ' +
-                  'title="' + (isPublic ? 'Anyone with the link can view' : 'Only you, after signing in') + '" ' +
-                  'style="font-size:0.7rem;padding:0.2rem 0.55rem;white-space:nowrap;">' +
-                  (isPublic ? '&#127760; Anyone' : '&#128274; Only me') +
-                '</button>' +
-                '<button class="btn-icon share-btn" data-key="' + esc(r.key) + '" title="Copy share link" style="padding:0.25rem;">' +
-                  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>' +
-                '</button>' +
-              '</div>';
-        }).join('');
-
-        previews.querySelectorAll('.vis-toggle').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const makePublic = btn.dataset.public !== 'true';
-                await invoke('set_project_visibility', { projectKey: btn.dataset.key, public: makePublic });
-                // Public only means anything off-network once a tunnel is up.
-                if (makePublic && !tunnelUrl) {
-                    customAlert('Shared with anyone who has the link.\n\nTurn on "Use anywhere" so the link works outside this Wi-Fi.');
-                }
-                await refresh();
-            });
-        });
-
-        previews.querySelectorAll('.share-btn').forEach((btn) => {
-            btn.addEventListener('click', async () => {
-                const row = rows.find((r) => r.key === btn.dataset.key);
-                if (!row) return;
-                // Prefer the address that works from anywhere.
-                const base = tunnelUrl || row.url;
-                const link = tunnelUrl ? tunnelUrl.replace(/\/$/, '') + '/p/' + row.port : row.url;
-                await navigator.clipboard.writeText(link);
-                btn.title = 'Copied';
-                setTimeout(() => { btn.title = 'Copy share link'; }, 1200);
-                if (row.visibility !== 'public') {
-                    customAlert('Link copied.\n\nThis project is set to "Only me", so whoever opens it must sign in with your account. Switch it to "Anyone" to share without a login.');
-                }
-            });
-        });
+    function openSettings() {
+        settingsModal.style.display = 'flex';
+        invoke('gateway_start').catch(() => {}).then(refreshSettings);
+        settingsTimer = setInterval(refreshSettings, 3000);
+    }
+    function closeSettings() {
+        settingsModal.style.display = 'none';
+        if (settingsTimer) { clearInterval(settingsTimer); settingsTimer = null; }
     }
 
-    // --- wiring ------------------------------------------------------------
-    function open() {
-        modal.style.display = 'flex';
-        showSettings(false);
-        // Starting the gateway on open removes a step nobody wanted to take.
-        invoke('gateway_start').catch(() => {}).then(refresh);
-        pollTimer = setInterval(refresh, 3000);
-    }
-    function close() {
-        modal.style.display = 'none';
-        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    }
+    $('settings-btn').addEventListener('click', openSettings);
+    $('close-settings-modal').addEventListener('click', closeSettings);
+    settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettings(); });
 
-    openBtn.addEventListener('click', open);
-    $('close-remote-modal').addEventListener('click', close);
-    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
-
-    $('remote-settings-btn').addEventListener('click', () => {
-        showSettings(setPane.style.display === 'none');
-    });
-    acctChip.addEventListener('click', () => showSettings(true));
-
-    $('remote-copy-btn').addEventListener('click', () => {
-        if (!urlInput.value) return;
-        navigator.clipboard.writeText(urlInput.value);
-        const b = $('remote-copy-btn');
-        b.textContent = 'Copied';
-        setTimeout(() => { b.textContent = 'Copy'; }, 1200);
+    $('link-copy').addEventListener('click', () => {
+        if (!$('link-url').value) return;
+        navigator.clipboard.writeText($('link-url').value);
+        $('link-copy').textContent = 'Copied';
+        setTimeout(() => { $('link-copy').textContent = 'Copy'; }, 1200);
     });
 
-    reachBtn.addEventListener('click', async () => {
-        reachBtn.disabled = true;
-        try {
-            if (tunnelUrl) {
-                const info = await invoke('gateway_status');
-                await invoke('tunnel_stop', { port: info.control_port });
-            } else {
-                if (!(await invoke('tunnel_available'))) {
-                    reachBtn.textContent = 'Installing…';
-                    await invoke('tunnel_install');
-                }
-                reachBtn.textContent = 'Connecting…';
-                await invoke('tunnel_start');
-            }
-            await refresh();
-        } catch (e) {
-            customAlert(String(e));
-        } finally {
-            reachBtn.disabled = false;
-        }
-    });
-
-    $('remote-toggle-btn').addEventListener('click', async () => {
-        const info = await invoke('gateway_status');
-        if (info.running) { await invoke('gateway_stop'); } else { await invoke('gateway_start'); }
-        await refresh();
-    });
-
-    // --- account actions ---------------------------------------------------
-    async function cloudAuth(command, btn, busy) {
-        const email = $('cloud-email').value.trim();
-        const pass = $('cloud-pass').value;
-        const msg = $('cloud-msg');
-        if (!email || !pass) { msg.textContent = 'Enter your email and password.'; return; }
-
-        const original = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = busy;
-        msg.textContent = '';
-        try {
-            const result = await invoke(command, { email: email, password: pass });
-            $('cloud-pass').value = '';
-            // Signup returns guidance worth keeping on screen.
-            msg.textContent = command === 'cloud_sign_up' ? result : '';
-            await refresh();
-        } catch (e) {
-            msg.textContent = String(e);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = original;
-        }
-    }
-
-    $('cloud-login-btn').addEventListener('click', function () { cloudAuth('cloud_sign_in', this, 'Signing in…'); });
-    $('cloud-signup-btn').addEventListener('click', function () { cloudAuth('cloud_sign_up', this, 'Creating…'); });
-
-    $('cloud-reset-btn').addEventListener('click', async function () {
-        const email = $('cloud-email').value.trim();
-        const msg = $('cloud-msg');
-        if (!email) { msg.textContent = 'Enter your email first, then press this.'; return; }
+    $('reach-btn').addEventListener('click', async function () {
         this.disabled = true;
         try {
-            msg.textContent = await invoke('cloud_reset_password', { email: email });
-        } catch (e) {
-            msg.textContent = String(e);
-        } finally {
-            this.disabled = false;
-        }
+            if (tunnelUrl) {
+                await invoke('tunnel_stop', { port: gatewayInfo.control_port });
+            } else {
+                if (!(await invoke('tunnel_available'))) {
+                    this.textContent = 'Installing…';
+                    await invoke('tunnel_install');
+                }
+                this.textContent = 'Connecting…';
+                await invoke('tunnel_start');
+            }
+            await refreshSettings();
+        } catch (e) { customAlert(String(e)); }
+        finally { this.disabled = false; }
     });
 
-    $('cloud-signout-btn').addEventListener('click', async () => {
-        await invoke('cloud_sign_out');
-        await refresh();
+    $('gateway-toggle').addEventListener('click', async () => {
+        const info = await invoke('gateway_status');
+        if (info.running) { await invoke('gateway_stop'); } else { await invoke('gateway_start'); }
+        await refreshSettings();
     });
 
-    $('acct-revoke-btn').addEventListener('click', async () => {
+    $('revoke-devices').addEventListener('click', async () => {
         await invoke('auth_revoke_sessions');
-        customAlert('All paired phones have been signed out.');
+        customAlert('Every linked phone has been signed out.');
     });
 
     $('cloud-connect-btn').addEventListener('click', async () => {
         const url = $('cloud-url').value.trim();
         const key = $('cloud-key').value.trim();
         if (!url || !key) { customAlert('Paste both the project URL and the anon key.'); return; }
-        try {
-            await invoke('cloud_set_config', { url: url, anonKey: key });
-            await refresh();
-        } catch (e) { customAlert(String(e)); }
+        try { await invoke('cloud_set_config', { url: url, anonKey: key }); await refreshSettings(); }
+        catch (e) { customAlert(String(e)); }
     });
+
+    // --------------------------------------------------- per-project share
+    const sharePop = $('share-popover');
+
+    /// The running preview for the active project, if any.
+    function previewForActive() {
+        if (!activeProject) return null;
+        const path = (activeProject.path || '').replace(/[\\/]+$/, '').toLowerCase();
+        return previewRows.find((r) => {
+            const rp = r.key.slice(0, r.key.lastIndexOf(':')).replace(/[\\/]+$/, '').toLowerCase();
+            return rp === path;
+        }) || null;
+    }
+
+    async function refreshShare() {
+        if (!activeProject) return;
+        try { previewRows = await invoke('gateway_previews'); } catch (e) {}
+
+        let vis = {};
+        try { vis = await invoke('project_visibility'); } catch (e) {}
+        const path = (activeProject.path || '').replace(/[\\/]+$/, '');
+        const current = vis[path] || 'private';
+        $('share-visibility').value = current;
+
+        const row = previewForActive();
+        const hint = $('share-hint');
+
+        if (!row) {
+            $('share-link').value = '';
+            $('share-link').placeholder = 'Start the project first';
+            hint.textContent = 'Run a script above, then a link appears here.';
+            return;
+        }
+
+        // Prefer the address that works off this network.
+        $('share-link').value = tunnelUrl
+            ? tunnelUrl.replace(/\/$/, '') + '/p/' + row.port
+            : row.url;
+
+        if (current === 'public' && !tunnelUrl) {
+            hint.textContent = 'Anyone with this link can open it, but only on this Wi-Fi. Turn on "Use anywhere" in Settings to share beyond it.';
+        } else if (current === 'public') {
+            hint.textContent = 'Anyone with this link can open it in a browser. No DevDeck app and no sign-in needed.';
+        } else {
+            hint.textContent = 'Only you. Whoever opens this must sign in with your account.';
+        }
+    }
+
+    $('share-project-btn').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const showing = sharePop.style.display === 'block';
+        sharePop.style.display = showing ? 'none' : 'block';
+        if (!showing) {
+            // The link is only meaningful once the gateway is up.
+            invoke('gateway_start').catch(() => {}).then(async () => {
+                let tunnels = {};
+                try {
+                    gatewayInfo = await invoke('gateway_status');
+                    tunnels = await invoke('tunnel_status');
+                } catch (err) {}
+                tunnelUrl = (gatewayInfo && tunnels[gatewayInfo.control_port]) || null;
+                await refreshShare();
+            });
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (sharePop.style.display === 'block' && !e.target.closest('#share-container')) {
+            sharePop.style.display = 'none';
+        }
+    });
+
+    $('share-visibility').addEventListener('change', async () => {
+        if (!activeProject) return;
+        const path = (activeProject.path || '').replace(/[\\/]+$/, '');
+        await invoke('set_project_visibility', {
+            projectKey: path,
+            public: $('share-visibility').value === 'public'
+        });
+        await refreshShare();
+    });
+
+    $('share-copy-btn').addEventListener('click', () => {
+        const v = $('share-link').value;
+        if (!v) return;
+        navigator.clipboard.writeText(v);
+        $('share-copy-btn').title = 'Copied';
+        setTimeout(() => { $('share-copy-btn').title = 'Copy link'; }, 1200);
+    });
+
+    // Expose so project selection can reveal the share control.
+    window.__devdeckShare = {
+        show(on) {
+            const c = $('share-container');
+            if (c) c.style.display = on ? 'block' : 'none';
+            if (!on) sharePop.style.display = 'none';
+        }
+    };
+
+    refreshAccountChip();
 })();

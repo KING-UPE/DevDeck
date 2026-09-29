@@ -129,12 +129,26 @@ pub fn revoke_all_sessions(db: &Db) -> Result<(), String> {
     db.clear_sessions()
 }
 
+/// Strip the script name from a `"<path>:<script>"` process key.
+///
+/// The index guard skips a Windows drive letter's colon, so `"D:\proj"` with
+/// no script is left whole.
+fn project_path_of(key: &str) -> &str {
+    match key.rfind(':') {
+        Some(i) if i > 2 => &key[..i],
+        _ => key,
+    }
+}
+
+/// Sharing is a property of the project, not of each script it happens to be
+/// running, so both sides resolve the key down to its path first. Otherwise
+/// `npm run dev` and `npm start` on one folder would need sharing separately.
 pub fn visibility_of(db: &Db, project_key: &str) -> Visibility {
-    Visibility::from_str(&db.visibility_of(project_key))
+    Visibility::from_str(&db.visibility_of(project_path_of(project_key)))
 }
 
 pub fn set_visibility(db: &Db, project_key: &str, v: Visibility) -> Result<(), String> {
-    db.set_visibility(project_key, v.as_str())
+    db.set_visibility(project_path_of(project_key), v.as_str())
 }
 
 #[cfg(test)]
@@ -217,6 +231,25 @@ mod tests {
 
         set_account(&d, "upe", "a-brand-new-one").unwrap();
         assert!(!is_valid_session(&d, &old), "old phone session survived");
+    }
+
+#[test]
+    fn sharing_covers_a_whole_project_not_one_script() {
+        let d = db();
+        set_visibility(&d, "D:/proj:dev", Visibility::Public).unwrap();
+
+        // Another script in the same folder inherits it.
+        assert_eq!(visibility_of(&d, "D:/proj:start"), Visibility::Public);
+        assert_eq!(visibility_of(&d, "D:/proj"), Visibility::Public);
+        // A different project does not.
+        assert_eq!(visibility_of(&d, "D:/other:dev"), Visibility::Private);
+    }
+
+    #[test]
+    fn a_drive_letter_colon_is_not_a_script_separator() {
+        assert_eq!(project_path_of("D:/proj"), "D:/proj");
+        assert_eq!(project_path_of("D:/proj:dev"), "D:/proj");
+        assert_eq!(project_path_of("D:/a/b:live server"), "D:/a/b");
     }
 
     #[test]
