@@ -1,0 +1,11 @@
+name = "devdeck-rendezvous"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# One namespace holds every installation's record, keyed by a random
+# capability id. Create it once with:
+#   npx wrangler kv namespace create RENDEZVOUS
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "RENDEZVOUS"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

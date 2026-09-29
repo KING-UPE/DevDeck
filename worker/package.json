@@ -1,0 +1,15 @@
+{
+  "name": "devdeck-rendezvous",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Resolves a DevDeck installation's current tunnel URL. Stores no personal data.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

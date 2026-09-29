@@ -45,3 +45,8 @@ getrandom = "0.4"
 # SQLite, and nothing for users to install.
 rusqlite = { version = "0.40", features = ["bundled"] }
 
+# One-shot HTTPS client for publishing the tunnel URL to the rendezvous, and a
+# file watcher so projects without their own HMR still reload on the phone.
+ureq = { version = "3", features = ["json"] }
+notify = "8"
+

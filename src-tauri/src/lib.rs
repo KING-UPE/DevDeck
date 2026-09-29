@@ -3,6 +3,7 @@ mod db;
 mod gateway;
 mod tunnel;
 mod ports;
+mod rendezvous;
 
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
@@ -666,7 +667,23 @@ async fn tunnel_start(state: State<'_, AppState>) -> Result<String, String> {
             .info()
             .control_port
     };
-    open_tunnel(state.tunnels.clone(), port).await
+    let url = open_tunnel(state.tunnels.clone(), port).await?;
+
+    // Advertise the new hostname so a paired phone finds it without being
+    // re-paired. A rendezvous failure must not fail the tunnel itself - the
+    // URL still works, it just has to be typed in.
+    let db = state.db.clone();
+    let publish_url = url.clone();
+    let published = tauri::async_runtime::spawn_blocking(move || {
+        rendezvous::publish(&db.lock().unwrap(), &publish_url)
+    })
+    .await
+    .map_err(|e| format!("publish task failed: {e}"))?;
+
+    if let Err(e) = published {
+        eprintln!("[devdeck] tunnel is up but the rendezvous rejected it: {e}");
+    }
+    Ok(url)
 }
 
 /// Expose one project's preview port publicly.
@@ -690,6 +707,9 @@ async fn open_tunnel(
 
 #[tauri::command]
 fn tunnel_stop(state: State<AppState>, port: Option<u16>) -> Result<(), String> {
+    // Stop advertising before the hostname dies, so a phone is not sent to a
+    // tunnel that no longer answers.
+    let _ = rendezvous::withdraw(&state.db.lock().unwrap());
     let mut mgr = state.tunnels.lock().unwrap();
     match port {
         Some(p) => mgr.close(p),
@@ -797,6 +817,24 @@ fn db_is_migrated(state: State<AppState>) -> bool {
 #[tauri::command]
 fn db_import_legacy(state: State<AppState>, legacy: db::LegacyState) -> Result<usize, String> {
     state.db.lock().unwrap().import_legacy(&legacy)
+}
+
+/// This installation's rendezvous identity, creating one on first use.
+#[tauri::command]
+fn rendezvous_identity(state: State<AppState>) -> Result<rendezvous::Identity, String> {
+    rendezvous::identity(&state.db.lock().unwrap())
+}
+
+/// Claim a fresh id, abandoning the old one.
+#[tauri::command]
+fn rendezvous_reset(state: State<AppState>) -> Result<rendezvous::Identity, String> {
+    rendezvous::reset(&state.db.lock().unwrap())
+}
+
+/// Point this install at a different rendezvous deployment.
+#[tauri::command]
+fn rendezvous_set_service(state: State<AppState>, url: String) -> Result<(), String> {
+    rendezvous::set_service(&state.db.lock().unwrap(), &url)
 }
 
 #[tauri::command]
@@ -1717,7 +1755,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
