@@ -226,7 +226,41 @@ pub fn sign_up(cfg: &CloudConfig, email: &str, password: &str) -> Result<String,
     if !ok(status) {
         return Err(friendly_error(status, &body));
     }
-    Ok("Account created. Check your email if confirmation is required.".into())
+    Ok(signup_outcome(&body))
+}
+
+/// Say what actually happened, rather than guessing.
+///
+/// With email confirmation on, signup returns a user but no session, and the
+/// account cannot sign in until the link is clicked. With it off, a session
+/// comes back immediately. Confirmation applies to signup alone - later
+/// password sign-ins never ask again.
+pub fn signup_outcome(body: &str) -> String {
+    let parsed: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+
+    if parsed.get("access_token").and_then(|v| v.as_str()).is_some() {
+        return "Account created. You are signed in.".into();
+    }
+    if parsed
+        .get("confirmation_sent_at")
+        .or_else(|| parsed.get("user").and_then(|u| u.get("confirmation_sent_at")))
+        .map(|v| !v.is_null())
+        .unwrap_or(false)
+    {
+        return "Account created. Check your email and click the confirmation link, then sign in."
+            .into();
+    }
+    // A signup for an address that already exists returns an identity-less user
+    // rather than an error, so it is not treated as success.
+    if parsed
+        .get("identities")
+        .and_then(|v| v.as_array())
+        .map(|a| a.is_empty())
+        .unwrap_or(false)
+    {
+        return "That email already has an account. Sign in instead.".into();
+    }
+    "Account created. Check your email if a confirmation was sent, then sign in.".into()
 }
 
 /// Exchange an email and password for a session.
@@ -411,6 +445,36 @@ mod tests {
         assert_eq!(owner(&d).as_deref(), Some("user-uuid-1"));
         clear_owner(&d).unwrap();
         assert!(owner(&d).is_none());
+    }
+
+#[test]
+    fn reports_what_signup_actually_did() {
+        // Confirmation required: a user, no session.
+        let pending = signup_outcome(
+            r#"{"id":"u1","email":"a@b.com","confirmation_sent_at":"2026-09-29T10:00:00Z","identities":[{"id":"i1"}]}"#,
+        );
+        assert!(pending.contains("Check your email"), "got: {pending}");
+
+        // Confirmation off: signed in straight away.
+        let immediate = signup_outcome(r#"{"access_token":"jwt","user":{"id":"u1"}}"#);
+        assert!(immediate.contains("signed in"), "got: {immediate}");
+    }
+
+    #[test]
+    fn a_duplicate_signup_is_not_reported_as_success() {
+        // Supabase returns a user with no identities rather than an error, to
+        // avoid revealing which addresses are registered.
+        let out = signup_outcome(r#"{"id":"u1","email":"a@b.com","identities":[]}"#);
+        assert!(out.contains("already has an account"), "got: {out}");
+    }
+
+    #[test]
+    fn confirmation_gates_signup_only_never_sign_in() {
+        // The unconfirmed case is an error on sign-in, and the message says how
+        // to fix it; there is no second factor on later sign-ins.
+        let msg = friendly_error(400, r#"{"error_code":"email_not_confirmed"}"#);
+        assert!(msg.contains("confirm"), "got: {msg}");
+        assert!(!msg.to_lowercase().contains("code"), "must not imply an OTP prompt: {msg}");
     }
 
     #[test]
