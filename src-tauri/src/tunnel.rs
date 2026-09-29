@@ -19,6 +19,7 @@
 use regex::Regex;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::OnceLock;
@@ -57,16 +58,42 @@ pub struct TunnelManager {
     active: HashMap<u16, Tunnel>,
 }
 
-/// Is `cloudflared` on PATH?
-pub fn is_installed() -> bool {
-    Command::new("cloudflared")
+/// Locate the cloudflared binary.
+///
+/// PATH is checked first, then the places Winget's MSI puts it. That fallback
+/// matters: a process inherits PATH at startup, so DevDeck cannot see a
+/// freshly installed cloudflared until it restarts. Resolving the path
+/// directly means Install then Enable works in one session.
+fn cloudflared_bin() -> Option<PathBuf> {
+    let on_path = Command::new("cloudflared")
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .apply_no_window()
         .status()
         .map(|s| s.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if on_path {
+        return Some(PathBuf::from("cloudflared"));
+    }
+
+    #[cfg(target_os = "windows")]
+    for dir in [
+        r"C:\Program Files (x86)\cloudflared",
+        r"C:\Program Files\cloudflared",
+    ] {
+        let exe = Path::new(dir).join("cloudflared.exe");
+        if exe.exists() {
+            return Some(exe);
+        }
+    }
+
+    None
+}
+
+/// Is cloudflared available, on PATH or in a known install location?
+pub fn is_installed() -> bool {
+    cloudflared_bin().is_some()
 }
 
 /// Install cloudflared via Winget.
@@ -116,11 +143,9 @@ impl TunnelManager {
         if let Some(t) = self.active.get(&port) {
             return Ok(t.url.clone());
         }
-        if !is_installed() {
-            return Err("cloudflared is not installed".into());
-        }
+        let bin = cloudflared_bin().ok_or("cloudflared is not installed")?;
 
-        let mut child = no_window(&mut Command::new("cloudflared"))
+        let mut child = no_window(&mut Command::new(&bin))
             .args([
                 "tunnel",
                 "--url",
@@ -217,6 +242,17 @@ mod tests {
         }
         let mut m = TunnelManager::default();
         assert!(m.open(7420).is_err());
+    }
+
+#[test]
+    fn finds_cloudflared_after_a_winget_install() {
+        // On a machine where the MSI has run, detection must succeed even
+        // though this process's PATH predates the install.
+        #[cfg(target_os = "windows")]
+        if Path::new(r"C:\Program Files (x86)\cloudflared\cloudflared.exe").exists() {
+            assert!(is_installed(), "installed cloudflared was not detected");
+            assert!(cloudflared_bin().is_some());
+        }
     }
 
     #[test]
