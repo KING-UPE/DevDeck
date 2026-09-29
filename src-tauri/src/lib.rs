@@ -1,4 +1,5 @@
 mod gateway;
+mod tunnel;
 mod ports;
 
 use std::process::{Command, Stdio};
@@ -53,6 +54,8 @@ struct AppState {
     detected_ports: Arc<Mutex<HashMap<String, u16>>>,
     /// The mobile gateway, once started. `None` until the user turns it on.
     gateway: Arc<Mutex<Option<gateway::Gateway>>>,
+    /// Public tunnels, keyed by the local port each exposes.
+    tunnels: Arc<Mutex<tunnel::TunnelManager>>,
 }
 
 fn update_tray_menu(app: &tauri::AppHandle) {
@@ -609,6 +612,9 @@ fn gateway_start(state: State<AppState>) -> Result<gateway::GatewayInfo, String>
 
 #[tauri::command]
 fn gateway_stop(state: State<AppState>) -> Result<(), String> {
+    // Tunnels point at gateway ports, so they die with it rather than lingering
+    // as cloudflared processes routing to nothing.
+    state.tunnels.lock().unwrap().close_all();
     if let Some(mut gw) = state.gateway.lock().unwrap().take() {
         gw.shutdown();
     }
@@ -625,6 +631,73 @@ fn gateway_pair_qr(state: State<AppState>) -> Result<String, String> {
         .pair_url
         .ok_or("No LAN address available - are you connected to a network?")?;
     gateway::qr_svg(&url)
+}
+
+/// Is cloudflared available for remote access?
+#[tauri::command]
+fn tunnel_available() -> bool {
+    tunnel::is_installed()
+}
+
+/// Install cloudflared via Winget, for the "remote access" opt-in.
+#[tauri::command]
+async fn tunnel_install() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(tunnel::install)
+        .await
+        .map_err(|e| format!("install task failed: {e}"))?
+}
+
+/// Expose the gateway's control plane publicly and return its URL.
+///
+/// This is what makes the project list reachable from another network. Sharing
+/// an individual project additionally needs [`tunnel_share_project`], because a
+/// quick tunnel covers exactly one port.
+#[tauri::command]
+async fn tunnel_start(state: State<'_, AppState>) -> Result<String, String> {
+    let port = {
+        let guard = state.gateway.lock().unwrap();
+        guard
+            .as_ref()
+            .ok_or("Turn on the gateway first")?
+            .info()
+            .control_port
+    };
+    open_tunnel(state.tunnels.clone(), port).await
+}
+
+/// Expose one project's preview port publicly.
+#[tauri::command]
+async fn tunnel_share_project(state: State<'_, AppState>, preview_port: u16) -> Result<String, String> {
+    open_tunnel(state.tunnels.clone(), preview_port).await
+}
+
+/// Shared body for the two commands above.
+///
+/// Opening a tunnel blocks for up to 45s waiting on Cloudflare, so it runs on
+/// the blocking pool rather than stalling the UI thread.
+async fn open_tunnel(
+    tunnels: Arc<Mutex<tunnel::TunnelManager>>,
+    port: u16,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || tunnels.lock().unwrap().open(port))
+        .await
+        .map_err(|e| format!("tunnel task failed: {e}"))?
+}
+
+#[tauri::command]
+fn tunnel_stop(state: State<AppState>, port: Option<u16>) -> Result<(), String> {
+    let mut mgr = state.tunnels.lock().unwrap();
+    match port {
+        Some(p) => mgr.close(p),
+        None => mgr.close_all(),
+    }
+    Ok(())
+}
+
+/// Every live tunnel, as a local-port to public-URL map.
+#[tauri::command]
+fn tunnel_status(state: State<AppState>) -> HashMap<u16, String> {
+    state.tunnels.lock().unwrap().all()
 }
 
 #[tauri::command]
@@ -1473,6 +1546,7 @@ pub fn run() {
             active_processes: Arc::new(Mutex::new(HashMap::new())),
             detected_ports: Arc::new(Mutex::new(HashMap::new())),
             gateway: Arc::new(Mutex::new(None)),
+            tunnels: Arc::new(Mutex::new(tunnel::TunnelManager::default())),
         })
         .setup(|app| {
             let _tray = tauri::tray::TrayIconBuilder::with_id("main")
@@ -1541,7 +1615,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

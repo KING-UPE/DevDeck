@@ -266,6 +266,24 @@
                     </div>
 
                     <button id="remote-toggle-btn" class="btn btn-primary btn-full">Turn on gateway</button>
+
+                    <div id="tunnel-section" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border);">
+                        <label class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">Remote access</label>
+                        <p class="text-muted" style="font-size: 0.78rem; margin: 0.3rem 0 0.6rem;">
+                            Reach your projects from a different network, over a Cloudflare tunnel. No account needed.
+                        </p>
+                        <div id="tunnel-missing" style="display: none;">
+                            <button id="tunnel-install-btn" class="btn btn-secondary btn-full" style="font-size: 0.82rem;">Install cloudflared</button>
+                        </div>
+                        <div id="tunnel-ready" style="display: none;">
+                            <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem;">
+                                <input id="tunnel-url" readonly placeholder="Not shared" style="flex: 1; font-family: ui-monospace, monospace; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                                <button id="tunnel-copy-btn" class="btn btn-secondary" style="padding: 0.35rem 0.7rem; font-size: 0.78rem;">Copy</button>
+                            </div>
+                            <button id="tunnel-toggle-btn" class="btn btn-secondary btn-full" style="font-size: 0.82rem;">Enable remote access</button>
+                        </div>
+                    </div>
+
                 </div>
             </div>
         </div>

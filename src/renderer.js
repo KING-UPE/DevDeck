@@ -1493,6 +1493,8 @@ projectTypeFilter.addEventListener('change', renderProjects);
             qrBox.innerHTML = 'Turn on the gateway<br>to get a pairing code';
             previews.textContent = 'No servers running yet.';
         }
+
+        await refreshTunnel(info);
     }
 
     async function refreshPreviews(info) {
@@ -1510,6 +1512,86 @@ projectTypeFilter.addEventListener('change', renderProjects);
         } catch (e) {
             previews.textContent = 'Could not reach the gateway.';
         }
+    }
+
+
+    // --- remote access over a Cloudflare tunnel ---------------------------
+    const tunMissing = document.getElementById('tunnel-missing');
+    const tunReady   = document.getElementById('tunnel-ready');
+    const tunInstall = document.getElementById('tunnel-install-btn');
+    const tunToggle  = document.getElementById('tunnel-toggle-btn');
+    const tunUrl     = document.getElementById('tunnel-url');
+    const tunCopy    = document.getElementById('tunnel-copy-btn');
+
+    async function refreshTunnel(info) {
+        if (!tunMissing) return;
+
+        let available = false;
+        try { available = await invoke('tunnel_available'); } catch (e) {}
+
+        tunMissing.style.display = available ? 'none' : 'block';
+        tunReady.style.display   = available ? 'block' : 'none';
+        if (!available) return;
+
+        // The control plane's own tunnel is the one that matters here; a
+        // project tunnel is opened separately from its card.
+        let tunnels = {};
+        try { tunnels = await invoke('tunnel_status'); } catch (e) {}
+
+        const controlUrl = info && info.control_port ? tunnels[info.control_port] : null;
+        tunUrl.value = controlUrl || '';
+        tunToggle.textContent = controlUrl ? 'Stop remote access' : 'Enable remote access';
+        tunToggle.disabled = !(info && info.running);
+        tunToggle.title = (info && info.running) ? '' : 'Turn on the gateway first';
+    }
+
+    if (tunInstall) {
+        tunInstall.addEventListener('click', async () => {
+            tunInstall.disabled = true;
+            tunInstall.textContent = 'Installing cloudflared...';
+            try {
+                await invoke('tunnel_install');
+                await refresh();
+            } catch (e) {
+                customAlert(String(e));
+            } finally {
+                tunInstall.disabled = false;
+                tunInstall.textContent = 'Install cloudflared';
+            }
+        });
+    }
+
+    if (tunToggle) {
+        tunToggle.addEventListener('click', async () => {
+            const info = await invoke('gateway_status');
+            const tunnels = await invoke('tunnel_status');
+            const live = tunnels[info.control_port];
+
+            tunToggle.disabled = true;
+            try {
+                if (live) {
+                    await invoke('tunnel_stop', { port: info.control_port });
+                } else {
+                    // Cloudflare can take a while to hand back a hostname.
+                    tunToggle.textContent = 'Opening tunnel (up to 45s)...';
+                    await invoke('tunnel_start');
+                }
+                await refresh();
+            } catch (e) {
+                customAlert('Tunnel error: ' + e);
+            } finally {
+                tunToggle.disabled = false;
+            }
+        });
+    }
+
+    if (tunCopy) {
+        tunCopy.addEventListener('click', () => {
+            if (!tunUrl.value) return;
+            navigator.clipboard.writeText(tunUrl.value);
+            tunCopy.textContent = 'Copied';
+            setTimeout(() => { tunCopy.textContent = 'Copy'; }, 1200);
+        });
     }
 
     function open() {
