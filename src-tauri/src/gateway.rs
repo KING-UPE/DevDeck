@@ -1202,6 +1202,32 @@ mod tests {
         );
     }
 
+#[test]
+    fn signing_in_to_the_cloud_locks_the_machine_down() {
+        // Regression: the "unclaimed machine" escape hatch only looked at the
+        // local account table, so a cloud sign-in left every project readable
+        // by anyone - over a tunnel, that is the whole internet.
+        let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
+        crate::cloud::set_owner(&db.lock().unwrap(), "user-uuid-1").unwrap();
+
+        let gw = Gateway::start_on(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            0,
+            db.clone(),
+            Registry::default(),
+            None,
+        )
+        .unwrap();
+        let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
+
+        let preview = get(port, "/");
+        assert!(preview.contains("401"), "private project served anonymously: {preview}");
+        assert!(!preview.contains("top secret"), "private body leaked");
+
+        let list = get(gw.control_port, "/api/previews");
+        assert!(list.contains("401"), "project list served anonymously: {list}");
+    }
+
     #[test]
     fn tokens_are_unique_and_long_enough() {
         let (a, b) = (random_token(), random_token());

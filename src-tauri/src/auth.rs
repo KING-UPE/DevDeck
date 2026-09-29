@@ -66,8 +66,17 @@ pub fn verify_password(password: &str, stored_hash: &str) -> bool {
         .is_ok()
 }
 
+/// Is this machine claimed by anybody?
+///
+/// An unclaimed machine stays open on the LAN, because demanding a login
+/// nobody has created would lock a user out of their own computer. Once
+/// claimed, access is gated.
+///
+/// A cloud sign-in counts. It is the only account most users will ever create,
+/// and checking the local table alone left a cloud-signed-in machine looking
+/// unclaimed - which served every project to anyone who could reach it.
 pub fn has_account(db: &Db) -> bool {
-    db.account().is_some()
+    db.account().is_some() || crate::cloud::owner(db).is_some()
 }
 
 pub fn username(db: &Db) -> Option<String> {
@@ -134,6 +143,25 @@ mod tests {
 
     fn db() -> Db {
         Db::open_in_memory().unwrap()
+    }
+
+#[test]
+    fn a_cloud_sign_in_claims_the_machine() {
+        let d = db();
+        assert!(!has_account(&d), "a fresh machine is unclaimed");
+
+        crate::cloud::set_owner(&d, "user-uuid-1").unwrap();
+        assert!(has_account(&d), "cloud sign-in must claim the machine");
+
+        crate::cloud::clear_owner(&d).unwrap();
+        assert!(!has_account(&d), "signing out releases it again");
+    }
+
+    #[test]
+    fn either_kind_of_account_claims_the_machine() {
+        let d = db();
+        set_account(&d, "upe", "correct-horse").unwrap();
+        assert!(has_account(&d));
     }
 
     #[test]
