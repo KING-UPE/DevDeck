@@ -1,3 +1,4 @@
+mod auth;
 mod gateway;
 mod tunnel;
 mod ports;
@@ -56,6 +57,8 @@ struct AppState {
     gateway: Arc<Mutex<Option<gateway::Gateway>>>,
     /// Public tunnels, keyed by the local port each exposes.
     tunnels: Arc<Mutex<tunnel::TunnelManager>>,
+    /// Local accounts and per-project visibility. No database; see [`auth`].
+    auth: Arc<Mutex<auth::AuthStore>>,
 }
 
 fn update_tray_menu(app: &tauri::AppHandle) {
@@ -589,7 +592,7 @@ fn gateway_start(state: State<AppState>) -> Result<gateway::GatewayInfo, String>
     if let Some(gw) = guard.as_ref() {
         return Ok(gw.info());
     }
-    let gw = gateway::Gateway::start()?;
+    let gw = gateway::Gateway::start(state.auth.clone())?;
     let info = gw.info();
     *guard = Some(gw);
     drop(guard);
@@ -1547,6 +1550,7 @@ pub fn run() {
             detected_ports: Arc::new(Mutex::new(HashMap::new())),
             gateway: Arc::new(Mutex::new(None)),
             tunnels: Arc::new(Mutex::new(tunnel::TunnelManager::default())),
+            auth: Arc::new(Mutex::new(auth::AuthStore::load())),
         })
         .setup(|app| {
             let _tray = tauri::tray::TrayIconBuilder::with_id("main")

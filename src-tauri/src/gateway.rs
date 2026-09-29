@@ -15,8 +15,10 @@
 //! and costs nothing. Auth still works across all of them because browsers
 //! scope cookies by host and *ignore* the port.
 
+use crate::auth::{AuthStore, Visibility};
 use axum::{
-    extract::{Query, State},
+    extract::{Query, Request, State},
+    middleware::{self, Next},
     http::{header, StatusCode, Uri},
     response::{Html, IntoResponse, Redirect, Response},
     routing::get,
@@ -52,6 +54,7 @@ pub struct Gateway {
     bind: IpAddr,
     runtime: Arc<tokio::runtime::Runtime>,
     previews: Arc<Mutex<HashMap<String, Preview>>>,
+    auth: Arc<Mutex<AuthStore>>,
     control_shutdown: Option<oneshot::Sender<()>>,
     control_port: u16,
 }
@@ -61,6 +64,14 @@ struct ControlState {
     token: String,
     previews: Arc<Mutex<HashMap<String, Preview>>>,
     lan_ip: Option<IpAddr>,
+    auth: Arc<Mutex<AuthStore>>,
+}
+
+/// State for one project's preview listener.
+#[derive(Clone)]
+struct PreviewState {
+    project_key: String,
+    auth: Arc<Mutex<AuthStore>>,
 }
 
 /// What the desktop UI needs to render the pairing panel.
@@ -104,11 +115,15 @@ fn lan_ip() -> Option<IpAddr> {
 impl Gateway {
     /// Bind the control plane and return a handle. Preview planes start later,
     /// as ports are detected.
-    pub fn start() -> Result<Self, String> {
-        Self::start_on(IpAddr::from([0, 0, 0, 0]), CONTROL_PORT)
+    pub fn start(auth: Arc<Mutex<AuthStore>>) -> Result<Self, String> {
+        Self::start_on(IpAddr::from([0, 0, 0, 0]), CONTROL_PORT, auth)
     }
 
-    pub fn start_on(bind: IpAddr, control_port: u16) -> Result<Self, String> {
+    pub fn start_on(
+        bind: IpAddr,
+        control_port: u16,
+        auth: Arc<Mutex<AuthStore>>,
+    ) -> Result<Self, String> {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -126,7 +141,15 @@ impl Gateway {
             token: token.clone(),
             previews: previews.clone(),
             lan_ip: ip,
+            auth: auth.clone(),
         };
+
+        // The shell, its assets and the session endpoints stay public: the
+        // page must load in order to render a login form, and a service worker
+        // that 401s would break installability.
+        let protected = Router::new()
+            .route("/api/previews", get(list_previews))
+            .layer(middleware::from_fn_with_state(state.clone(), require_session));
 
         let app = Router::new()
             .route("/", get(index))
@@ -134,8 +157,10 @@ impl Gateway {
             .route("/sw.js", get(service_worker))
             .route("/icon-256.png", get(icon_256))
             .route("/icon-512.png", get(icon_512))
-            .route("/api/previews", get(list_previews))
             .route("/api/health", get(|| async { "ok" }))
+            .route("/api/session", get(session_info))
+            .route("/api/login", axum::routing::post(login))
+            .merge(protected)
             .with_state(state);
 
         let (tx, rx) = oneshot::channel::<()>();
@@ -162,6 +187,7 @@ impl Gateway {
 
         Ok(Gateway {
             bind,
+            auth,
             token,
             lan_ip: ip,
             runtime,
@@ -192,7 +218,20 @@ impl Gateway {
         self.remove_preview(key);
 
         let upstream = format!("http://127.0.0.1:{upstream_port}");
-        let app: Router = ReverseProxy::new("/", &upstream).into();
+        // Without this layer any device on the network - or anyone holding a
+        // tunnel URL - could read the dev server directly.
+        let pstate = PreviewState {
+            project_key: key.to_string(),
+            auth: self.auth.clone(),
+        };
+        let proxy: Router = ReverseProxy::new("/", &upstream).into();
+        // Capture the per-project state in a closure rather than using
+        // `from_fn_with_state`: the proxy router's state parameter is `()`, and
+        // the `State<_>` extractor cannot infer its tuple through that.
+        let app = proxy.layer(middleware::from_fn(move |req: Request, next: Next| {
+            let st = pstate.clone();
+            async move { require_preview_access(st, req, next).await }
+        }));
 
         // Claim the lowest free port by *actually binding* rather than scanning
         // a bookkeeping map: another process on this machine may hold a port we
@@ -269,6 +308,108 @@ pub fn qr_svg(data: &str) -> Result<String, String> {
 
 // ---------------------------------------------------------------- handlers
 
+/// Read the session cookie out of a request.
+fn session_cookie(req: &Request) -> Option<String> {
+    let raw = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    raw.split(';')
+        .filter_map(|c| c.trim().split_once('='))
+        .find(|(k, _)| *k == SESSION_COOKIE)
+        .map(|(_, v)| v.to_string())
+}
+
+/// Gate the control plane's data endpoints on a valid session.
+async fn require_session(
+    State(st): State<ControlState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let ok = session_cookie(&req)
+        .map(|t| st.auth.lock().unwrap().is_valid_session(&t))
+        .unwrap_or(false);
+
+    // With no account configured the gateway is LAN-convenience only, so the
+    // pairing token alone is enough; demanding a login the user never created
+    // would lock them out of their own machine.
+    let no_account = !st.auth.lock().unwrap().has_account();
+
+    if ok || no_account {
+        next.run(req).await
+    } else {
+        (StatusCode::UNAUTHORIZED, "Sign in to view your projects").into_response()
+    }
+}
+
+/// Gate one project's preview, unless the user marked it public.
+async fn require_preview_access(st: PreviewState, req: Request, next: Next) -> Response {
+    // Resolve every decision that needs the lock *before* any await: holding a
+    // std MutexGuard across one makes the future non-Send, and axum requires
+    // Send futures.
+    let allow_anonymous = {
+        let auth = st.auth.lock().unwrap();
+        auth.visibility_of(&st.project_key) == Visibility::Public || !auth.has_account()
+    };
+    if allow_anonymous {
+        return next.run(req).await;
+    }
+
+    let ok = {
+        let auth = st.auth.lock().unwrap();
+        session_cookie(&req)
+            .map(|t| auth.is_valid_session(&t))
+            .unwrap_or(false)
+    };
+
+    if ok {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            "This project is private. Sign in to DevDeck to view it.",
+        )
+            .into_response()
+    }
+}
+
+#[derive(Serialize)]
+struct SessionInfo {
+    authenticated: bool,
+    has_account: bool,
+    username: Option<String>,
+}
+
+async fn session_info(State(st): State<ControlState>, req: Request) -> Json<SessionInfo> {
+    let auth = st.auth.lock().unwrap();
+    let authenticated = session_cookie(&req)
+        .map(|t| auth.is_valid_session(&t))
+        .unwrap_or(false);
+    Json(SessionInfo {
+        authenticated,
+        has_account: auth.has_account(),
+        username: auth.username().map(str::to_string),
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct LoginBody {
+    username: String,
+    password: String,
+}
+
+async fn login(State(st): State<ControlState>, Json(body): Json<LoginBody>) -> Response {
+    match st.auth.lock().unwrap().login(&body.username, &body.password) {
+        Ok(token) => (
+            [(
+                header::SET_COOKIE,
+                format!("{SESSION_COOKIE}={token}; Path=/; Max-Age=31536000; SameSite=Lax"),
+            )],
+            Json(serde_json::json!({ "ok": true })),
+        )
+            .into_response(),
+        Err(e) => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": e }))).into_response(),
+    }
+}
+
+
 #[derive(serde::Deserialize)]
 struct AuthQuery {
     t: Option<String>,
@@ -279,10 +420,13 @@ struct AuthQuery {
 async fn index(State(st): State<ControlState>, Query(q): Query<AuthQuery>) -> Response {
     if let Some(t) = q.t {
         if t == st.token {
+            // Trade the pairing token for a real session, so revoking sessions
+            // logs paired phones out without having to rotate the QR.
+            let session = st.auth.lock().unwrap().mint_session();
             return (
                 [(
                     header::SET_COOKIE,
-                    format!("{SESSION_COOKIE}={t}; Path=/; Max-Age=31536000; SameSite=Lax"),
+                    format!("{SESSION_COOKIE}={session}; Path=/; Max-Age=31536000; SameSite=Lax"),
                 )],
                 Redirect::to("/"),
             )
@@ -402,10 +546,27 @@ mod tests {
         out
     }
 
+    /// GET with a session cookie attached.
+    fn get_auth(port: u16, path: &str, cookie: &str) -> String {
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        s.write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: devdeck_session={cookie}\r\nConnection: close\r\n\r\n").as_bytes(),
+        )
+        .unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out
+    }
+
     fn test_gateway() -> Gateway {
         // Loopback + port 0 keeps the test off the wildcard address, which would
         // otherwise raise a Windows Firewall prompt on every run.
-        Gateway::start_on(IpAddr::V4(Ipv4Addr::LOCALHOST), 0).unwrap()
+        Gateway::start_on(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            0,
+            Arc::new(Mutex::new(AuthStore::default())),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -490,6 +651,81 @@ mod tests {
         gw.add_preview("proj:dev", spawn_upstream("x")).unwrap();
         let body = get(gw.control_port, "/api/previews");
         assert!(body.contains("proj:dev"), "preview missing from list: {body}");
+    }
+
+/// Build a gateway whose auth store has a real account configured.
+    fn gateway_with_account() -> (Gateway, Arc<Mutex<AuthStore>>) {
+        let auth = Arc::new(Mutex::new(AuthStore::default()));
+        auth.lock().unwrap().set_account("upe", "correct-horse").unwrap();
+        let gw = Gateway::start_on(IpAddr::V4(Ipv4Addr::LOCALHOST), 0, auth.clone()).unwrap();
+        (gw, auth)
+    }
+
+    #[test]
+    fn a_private_project_refuses_anonymous_viewers() {
+        let (gw, _auth) = gateway_with_account();
+        let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
+
+        let resp = get(port, "/");
+        assert!(resp.contains("401"), "private project was served: {resp}");
+        assert!(!resp.contains("top secret"), "private body leaked: {resp}");
+    }
+
+    #[test]
+    fn a_signed_in_viewer_reaches_a_private_project() {
+        let (gw, auth) = gateway_with_account();
+        let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
+        let token = auth.lock().unwrap().login("upe", "correct-horse").unwrap();
+
+        let resp = get_auth(port, "/", &token);
+        assert!(resp.contains("200 OK"), "signed-in viewer blocked: {resp}");
+        assert!(resp.contains("top secret"), "body missing: {resp}");
+    }
+
+    #[test]
+    fn a_public_project_is_viewable_without_signing_in() {
+        let (gw, auth) = gateway_with_account();
+        auth.lock().unwrap().set_visibility("demo:dev", Visibility::Public);
+        let port = gw.add_preview("demo:dev", spawn_upstream("client demo")).unwrap();
+
+        let resp = get(port, "/");
+        assert!(resp.contains("200 OK"), "public project blocked: {resp}");
+        assert!(resp.contains("client demo"));
+    }
+
+    #[test]
+    fn a_stale_session_stops_working_after_a_password_change() {
+        let (gw, auth) = gateway_with_account();
+        let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
+        let token = auth.lock().unwrap().login("upe", "correct-horse").unwrap();
+        assert!(get_auth(port, "/", &token).contains("200 OK"));
+
+        auth.lock().unwrap().set_account("upe", "a-brand-new-one").unwrap();
+        let resp = get_auth(port, "/", &token);
+        assert!(resp.contains("401"), "revoked session still worked: {resp}");
+    }
+
+    #[test]
+    fn the_project_list_needs_a_session_once_an_account_exists() {
+        let (gw, auth) = gateway_with_account();
+        gw.add_preview("secret:dev", spawn_upstream("x")).unwrap();
+
+        let anon = get(gw.control_port, "/api/previews");
+        assert!(anon.contains("401"), "project list leaked anonymously: {anon}");
+
+        let token = auth.lock().unwrap().login("upe", "correct-horse").unwrap();
+        let signed = get_auth(gw.control_port, "/api/previews", &token);
+        assert!(signed.contains("secret:dev"), "signed-in list empty: {signed}");
+    }
+
+    #[test]
+    fn without_an_account_the_gateway_stays_lan_convenient() {
+        // No account configured: demanding a login nobody created would lock
+        // the user out of their own machine.
+        let gw = test_gateway();
+        let port = gw.add_preview("proj:dev", spawn_upstream("hello")).unwrap();
+        assert!(get(port, "/").contains("200 OK"));
+        assert!(get(gw.control_port, "/api/previews").contains("proj:dev"));
     }
 
     #[test]
