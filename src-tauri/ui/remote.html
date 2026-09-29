@@ -215,12 +215,26 @@
   <div class="wrap">
     <h2>Sign in to DevDeck</h2>
     <p>Use the account you created on your PC.</p>
+    <div id="cloud-form" style="display:none;">
+      <input class="field" id="cl-email" type="email" autocomplete="username"
+             autocapitalize="none" autocorrect="off" placeholder="Email" style="margin-bottom:12px;" />
+      <input class="field" id="cl-pass" type="password" autocomplete="current-password"
+             placeholder="Password" />
+      <p class="err" id="cl-err"></p>
+      <button class="primary" id="cl-go">Sign in</button>
+      <button id="use-local" style="margin-top:14px;background:none;border:0;color:var(--dim);font:inherit;font-size:.8rem;cursor:pointer;">
+        Use this PC's password instead
+      </button>
+    </div>
+
+    <div id="local-form">
     <input class="field" id="lg-user" type="text" autocomplete="username"
            autocapitalize="none" autocorrect="off" placeholder="Username" />
     <input class="field" id="lg-pass" type="password" autocomplete="current-password"
            placeholder="Password" />
     <p class="err" id="lg-err"></p>
     <button class="primary" id="lg-go">Sign in</button>
+    </div>
   </div>
 </section>
 
@@ -565,8 +579,13 @@
       var info = await r.json();
       /* With no account configured the gateway is LAN-convenience only, so
          there is nothing to sign in to. */
-      var needs = info.has_account && !info.authenticated;
+      var needs = (info.has_account || info.cloud) && !info.authenticated;
       document.body.classList.toggle('needs-login', needs);
+
+      cloudCfg = info.cloud || null;
+      /* Cloud sign-in works from any network; the local password is the
+         fallback for when the cloud service is unreachable. */
+      showCloudForm(!!cloudCfg);
       return !needs;
     } catch (e) {
       return false;

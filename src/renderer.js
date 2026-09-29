@@ -1570,6 +1570,7 @@ projectTypeFilter.addEventListener('change', renderProjects);
 
         await refreshTunnel(info);
         await refreshAccount();
+        await refreshCloud();
     }
 
     async function refreshPreviews(info) {
@@ -1742,6 +1743,68 @@ projectTypeFilter.addEventListener('change', renderProjects);
             customAlert('All paired devices have been signed out.');
         });
     }
+
+
+    // --- cloud account -----------------------------------------------------
+    const cloudUnconf  = document.getElementById('cloud-unconfigured');
+    const cloudSignin  = document.getElementById('cloud-signin');
+    const cloudSigned  = document.getElementById('cloud-signed-in');
+    const cloudEmailEl = document.getElementById('cloud-email-label');
+
+    async function refreshCloud() {
+        if (!cloudUnconf) return;
+        let st = { configured: false, signed_in: false };
+        try { st = await invoke('cloud_status'); } catch (e) {}
+
+        cloudUnconf.style.display = st.configured ? 'none' : 'block';
+        cloudSignin.style.display = (st.configured && !st.signed_in) ? 'block' : 'none';
+        cloudSigned.style.display = st.signed_in ? 'block' : 'none';
+        if (st.signed_in) cloudEmailEl.textContent = st.email || 'your account';
+    }
+
+    function bind(id, handler) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', handler);
+    }
+
+    bind('cloud-connect-btn', async function () {
+        const url = document.getElementById('cloud-url').value.trim();
+        const key = document.getElementById('cloud-key').value.trim();
+        if (!url || !key) { customAlert('Paste both the project URL and the anon key.'); return; }
+        try {
+            await invoke('cloud_set_config', { url: url, anonKey: key });
+            await refresh();
+        } catch (e) { customAlert(String(e)); }
+    });
+
+    async function cloudAuth(command, btn, busyLabel) {
+        const email = document.getElementById('cloud-email').value.trim();
+        const pass = document.getElementById('cloud-pass').value;
+        if (!email || !pass) { customAlert('Enter your email and password.'); return; }
+
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = busyLabel;
+        try {
+            const msg = await invoke(command, { email: email, password: pass });
+            document.getElementById('cloud-pass').value = '';
+            if (command === 'cloud_sign_up') customAlert(msg);
+            await refresh();
+        } catch (e) {
+            customAlert(String(e));
+        } finally {
+            btn.disabled = false;
+            btn.textContent = original;
+        }
+    }
+
+    bind('cloud-login-btn',  function () { cloudAuth('cloud_sign_in', this, 'Signing in...'); });
+    bind('cloud-signup-btn', function () { cloudAuth('cloud_sign_up', this, 'Creating...'); });
+
+    bind('cloud-signout-btn', async function () {
+        await invoke('cloud_sign_out');
+        await refresh();
+    });
 
     function open() {
         modal.style.display = 'flex';

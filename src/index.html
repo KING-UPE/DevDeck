@@ -290,6 +290,39 @@
                             </div>
                         </div>
                     </div>
+
+                    <div id="cloud-section" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border);">
+                        <label class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">Cloud account</label>
+                        <p class="text-muted" style="font-size: 0.78rem; margin: 0.3rem 0 0.6rem;">
+                            One login for every device. Only your machine name and tunnel address are stored &mdash; never your project paths.
+                        </p>
+
+                        <div id="cloud-unconfigured">
+                            <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem;">
+                                <input id="cloud-url" placeholder="https://xxxx.supabase.co" autocomplete="off" style="flex: 1; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                                <input id="cloud-key" placeholder="anon public key" autocomplete="off" style="flex: 1; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                            </div>
+                            <button id="cloud-connect-btn" class="btn btn-secondary btn-full" style="font-size: 0.82rem;">Connect a project</button>
+                        </div>
+
+                        <div id="cloud-signin" style="display: none;">
+                            <div style="display: flex; gap: 0.4rem; margin-bottom: 0.5rem;">
+                                <input id="cloud-email" type="email" placeholder="Email" autocomplete="off" style="flex: 1; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                                <input id="cloud-pass" type="password" placeholder="Password" autocomplete="off" style="flex: 1; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                            </div>
+                            <div style="display: flex; gap: 0.4rem;">
+                                <button id="cloud-login-btn" class="btn btn-primary" style="flex: 1; font-size: 0.8rem;">Sign in</button>
+                                <button id="cloud-signup-btn" class="btn btn-secondary" style="flex: 1; font-size: 0.8rem;">Create account</button>
+                            </div>
+                        </div>
+
+                        <div id="cloud-signed-in" style="display: none;">
+                            <div style="font-size: 0.82rem; margin-bottom: 0.5rem;">
+                                Linked as <strong id="cloud-email-label"></strong>
+                            </div>
+                            <button id="cloud-signout-btn" class="btn btn-secondary btn-full" style="font-size: 0.78rem;">Sign out of cloud</button>
+                        </div>
+                    </div>
                     <div id="tunnel-section" style="margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--border);">
                         <label class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">Remote access</label>
                         <p class="text-muted" style="font-size: 0.78rem; margin: 0.3rem 0 0.6rem;">

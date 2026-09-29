@@ -16,6 +16,7 @@
 //! scope cookies by host and *ignore* the port.
 
 use crate::auth::{self, Visibility};
+use crate::cloud;
 use crate::db::Db;
 use crate::livereload::{self, Reloader};
 use crate::processes::Registry;
@@ -198,6 +199,7 @@ impl Gateway {
             .route("/api/health", get(|| async { "ok" }))
             .route("/api/session", get(session_info))
             .route("/api/login", axum::routing::post(login))
+            .route("/api/cloud-login", axum::routing::post(cloud_login))
             .merge(protected)
             .with_state(state);
 
@@ -384,6 +386,77 @@ pub fn qr_svg(data: &str) -> Result<String, String> {
 
 // ---------------------------------------------------------------- handlers
 
+#[derive(serde::Deserialize)]
+struct CloudLoginBody {
+    access_token: String,
+}
+
+/// Trade a cloud access token for a local session.
+///
+/// This is what makes one login enough: the phone signs in to the cloud
+/// account, and the machine independently confirms with the cloud service that
+/// the token is genuine *and* belongs to this machine's owner before letting it
+/// in. Verification goes to the service rather than checking a signature here,
+/// so no signing secret has to live on the user's machine.
+async fn cloud_login(State(st): State<ControlState>, Json(body): Json<CloudLoginBody>) -> Response {
+    let (cfg, owner) = {
+        let db = st.db.lock().unwrap();
+        match (cloud::config(&db), cloud::owner(&db)) {
+            (Some(c), Some(o)) => (c, o),
+            _ => {
+                return (
+                    StatusCode::NOT_IMPLEMENTED,
+                    Json(serde_json::json!({ "error": "This machine is not attached to a cloud account." })),
+                )
+                    .into_response()
+            }
+        }
+    };
+
+    let token = body.access_token;
+    let verified = tokio::task::spawn_blocking(move || cloud::verify_token(&cfg, &token)).await;
+
+    let user_id = match verified {
+        Ok(Ok(id)) => id,
+        Ok(Err(e)) => {
+            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": e }))).into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
+    };
+
+    if user_id != owner {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "That account does not own this machine." })),
+        )
+            .into_response();
+    }
+
+    let session = match auth::mint_session(&st.db.lock().unwrap()) {
+        Ok(t) => t,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+                .into_response()
+        }
+    };
+
+    (
+        [(
+            header::SET_COOKIE,
+            format!("{SESSION_COOKIE}={session}; Path=/; Max-Age=31536000; SameSite=Lax"),
+        )],
+        Json(serde_json::json!({ "ok": true })),
+    )
+        .into_response()
+}
+
+
 /// A process key carries drive letters and colons, so it travels as a query
 /// parameter rather than a path segment that would need escaping.
 #[derive(serde::Deserialize)]
@@ -568,6 +641,17 @@ struct SessionInfo {
     authenticated: bool,
     has_account: bool,
     username: Option<String>,
+    /// Present when this machine is attached to a cloud account, so the phone
+    /// can offer a cloud sign-in. Both values are public by design: the anon
+    /// key ships in every Supabase client and Row Level Security is what
+    /// protects the data.
+    cloud: Option<CloudHint>,
+}
+
+#[derive(Serialize)]
+struct CloudHint {
+    url: String,
+    anon_key: String,
 }
 
 async fn session_info(State(st): State<ControlState>, req: Request) -> Json<SessionInfo> {
@@ -575,10 +659,20 @@ async fn session_info(State(st): State<ControlState>, req: Request) -> Json<Sess
     let authenticated = session_cookie(&req)
         .map(|t| auth::is_valid_session(&db, &t))
         .unwrap_or(false);
+    // Only advertise cloud sign-in once a machine has an owner; before that
+    // there is no account to match a token against.
+    let cloud = cloud::config(&db)
+        .filter(|_| cloud::owner(&db).is_some())
+        .map(|c| CloudHint {
+            url: c.url,
+            anon_key: c.anon_key,
+        });
+
     Json(SessionInfo {
         authenticated,
         has_account: auth::has_account(&db),
         username: auth::username(&db),
+        cloud,
     })
 }
 
@@ -1057,6 +1151,37 @@ mod tests {
         let mut out = String::new();
         let _ = s.read_to_string(&mut out);
         assert!(out.contains("503"), "expected 503, got: {out}");
+    }
+
+#[test]
+    fn cloud_sign_in_is_refused_when_no_account_is_attached() {
+        // Without an owner there is nothing to match a token against, so the
+        // gateway must decline rather than trust the token on its own.
+        let gw = test_gateway();
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, gw.control_port)).unwrap();
+        let body = r#"{"access_token":"anything"}"#;
+        let req = format!(
+            "POST /api/cloud-login HTTP/1.1{}Host: 127.0.0.1{}Content-Type: application/json{}Content-Length: {}{}Connection: close{}{}{}",
+            CRLF, CRLF, CRLF, body.len(), CRLF, CRLF, CRLF, body
+        );
+        s.write_all(req.as_bytes()).unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        assert!(out.contains("501"), "expected 501, got: {out}");
+        assert!(out.contains("not attached"), "unhelpful message: {out}");
+    }
+
+    #[test]
+    fn the_session_endpoint_hides_cloud_details_until_a_machine_is_claimed() {
+        let gw = test_gateway();
+        let body = get(gw.control_port, "/api/session");
+        assert!(body.contains("200 OK"));
+        // `cloud` must be null, so the phone does not offer a sign-in that
+        // cannot possibly succeed.
+        assert!(
+            body.contains("\"cloud\":null"),
+            "cloud details exposed before an owner was set: {body}"
+        );
     }
 
     #[test]

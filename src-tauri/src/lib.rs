@@ -1,4 +1,5 @@
 mod auth;
+mod cloud;
 mod db;
 mod gateway;
 mod tunnel;
@@ -65,6 +66,9 @@ struct AppState {
     db: Arc<Mutex<db::Db>>,
     /// Recent output and restart details, readable by the gateway.
     processes: processes::Registry,
+    /// The signed-in cloud session, if any. Tokens stay in memory
+    /// rather than on disk.
+    cloud_session: Arc<Mutex<Option<cloud::CloudSession>>>,
 }
 
 fn update_tray_menu(app: &tauri::AppHandle) {
@@ -703,6 +707,13 @@ async fn tunnel_start(state: State<'_, AppState>) -> Result<String, String> {
     if let Err(e) = published {
         eprintln!("[devdeck] tunnel is up but the rendezvous rejected it: {e}");
     }
+
+    // Advertise under the cloud account too, so signing in on a phone is enough
+    // to find this machine. Best effort: the tunnel works regardless.
+    if let Err(e) = publish_to_cloud(&state, &url).await {
+        eprintln!("[devdeck] could not register this machine with the cloud: {e}");
+    }
+
     Ok(url)
 }
 
@@ -723,6 +734,36 @@ async fn open_tunnel(
     tauri::async_runtime::spawn_blocking(move || tunnels.lock().unwrap().open(port))
         .await
         .map_err(|e| format!("tunnel task failed: {e}"))?
+}
+
+/// Register this machine's current tunnel URL under the signed-in account.
+async fn publish_to_cloud(state: &State<'_, AppState>, url: &str) -> Result<(), String> {
+    let (cfg, token, user_id) = {
+        let db = state.db.lock().unwrap();
+        let Some(cfg) = cloud::config(&db) else {
+            return Ok(()); // no cloud project: nothing to do
+        };
+        let guard = state.cloud_session.lock().unwrap();
+        let Some(session) = guard.as_ref() else {
+            return Ok(()); // not signed in
+        };
+        (cfg, session.access_token.clone(), session.user_id.clone())
+    };
+
+    let name = hostname();
+    let url = url.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        cloud::upsert_device(&cfg, &token, &user_id, &name, Some(&url))
+    })
+    .await
+    .map_err(|e| format!("device registration failed: {e}"))?
+}
+
+/// A human-readable name for this machine, for the device list.
+fn hostname() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "This PC".to_string())
 }
 
 #[tauri::command]
@@ -855,6 +896,98 @@ fn rendezvous_reset(state: State<AppState>) -> Result<rendezvous::Identity, Stri
 #[tauri::command]
 fn rendezvous_set_service(state: State<AppState>, url: String) -> Result<(), String> {
     rendezvous::set_service(&state.db.lock().unwrap(), &url)
+}
+
+#[derive(serde::Serialize)]
+struct CloudStatus {
+    configured: bool,
+    signed_in: bool,
+    email: Option<String>,
+}
+
+/// Whether this build has a cloud project and whether a machine owner is set.
+#[tauri::command]
+fn cloud_status(state: State<AppState>) -> CloudStatus {
+    let db = state.db.lock().unwrap();
+    let session = state.cloud_session.lock().unwrap();
+    CloudStatus {
+        configured: cloud::is_configured(&db),
+        signed_in: cloud::owner(&db).is_some(),
+        email: session.as_ref().map(|s: &cloud::CloudSession| s.email.clone()),
+    }
+}
+
+/// Point this install at a Supabase project.
+#[tauri::command]
+fn cloud_set_config(state: State<AppState>, url: String, anon_key: String) -> Result<(), String> {
+    cloud::set_config(&state.db.lock().unwrap(), &url, &anon_key)
+}
+
+/// Create a cloud account. Network-bound, so it runs off the UI thread.
+#[tauri::command]
+async fn cloud_sign_up(
+    state: State<'_, AppState>,
+    email: String,
+    password: String,
+) -> Result<String, String> {
+    let cfg = {
+        let db = state.db.lock().unwrap();
+        cloud::config(&db).ok_or("No cloud project is configured")?
+    };
+    tauri::async_runtime::spawn_blocking(move || cloud::sign_up(&cfg, &email, &password))
+        .await
+        .map_err(|e| format!("sign-up task failed: {e}"))?
+}
+
+/// Sign in and claim this machine for the account.
+#[tauri::command]
+async fn cloud_sign_in(
+    state: State<'_, AppState>,
+    email: String,
+    password: String,
+) -> Result<String, String> {
+    let cfg = {
+        let db = state.db.lock().unwrap();
+        cloud::config(&db).ok_or("No cloud project is configured")?
+    };
+
+    let session = tauri::async_runtime::spawn_blocking(move || cloud::sign_in(&cfg, &email, &password))
+        .await
+        .map_err(|e| format!("sign-in task failed: {e}"))??;
+
+    // The machine now belongs to this account; the gateway checks presented
+    // tokens against it before minting a local session.
+    cloud::set_owner(&state.db.lock().unwrap(), &session.user_id)?;
+    let email = session.email.clone();
+    *state.cloud_session.lock().unwrap() = Some(session);
+    Ok(email)
+}
+
+/// Forget the cloud account on this machine.
+#[tauri::command]
+fn cloud_sign_out(state: State<AppState>) -> Result<(), String> {
+    *state.cloud_session.lock().unwrap() = None;
+    cloud::clear_owner(&state.db.lock().unwrap())
+}
+
+/// Machines registered to the signed-in account.
+#[tauri::command]
+async fn cloud_devices(state: State<'_, AppState>) -> Result<Vec<cloud::Device>, String> {
+    let (cfg, token) = {
+        let db = state.db.lock().unwrap();
+        let cfg = cloud::config(&db).ok_or("No cloud project is configured")?;
+        let token = state
+            .cloud_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s: &cloud::CloudSession| s.access_token.clone())
+            .ok_or("Sign in to the cloud account first")?;
+        (cfg, token)
+    };
+    tauri::async_runtime::spawn_blocking(move || cloud::list_devices(&cfg, &token))
+        .await
+        .map_err(|e| format!("device lookup failed: {e}"))?
 }
 
 #[tauri::command]
@@ -1773,6 +1906,7 @@ pub fn run() {
                 db::Db::open().expect("could not open the DevDeck database"),
             )),
             processes: processes::Registry::default(),
+            cloud_session: Arc::new(Mutex::new(None)),
         })
         .setup(|app| {
             let _tray = tauri::tray::TrayIconBuilder::with_id("main")
@@ -1841,7 +1975,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
