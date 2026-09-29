@@ -69,13 +69,68 @@ function isPathInArray(arr, path) {
     return arr.some(item => item.replace(/\\/g, '/').toLowerCase() === normalized);
 }
 
-let workspaces = JSON.parse(localStorage.getItem('workspaces') || '[]');
+// === PERSISTENT STATE (SQLite) ===
+// These used to live in localStorage, which the Rust side cannot read - so the
+// phone never saw workspace names, pins or custom project names. They are rows
+// in the database now; `stateCache` holds the last loaded copy so reads stay
+// synchronous the way the surrounding code expects.
+let stateCache = {};
+
+function stored(key, fallback) {
+    return stateCache[key] !== undefined ? stateCache[key] : fallback;
+}
+
+/// Flags are written as 'true' by the UI but imported as '1'; accept both.
+function storedFlag(key) {
+    const v = stored(key, '');
+    return v === '1' || v === 'true';
+}
+
+function persist(key, value) {
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    stateCache[key] = text;
+    invoke('db_save_state', { key: key, value: text })
+        .catch(e => console.error('Could not save ' + key, e));
+}
+
+let workspaces = [];
 let allProjects = [];
-let hiddenProjects = JSON.parse(localStorage.getItem('hiddenProjects') || '[]');
-let knownProjects = JSON.parse(localStorage.getItem('knownProjects') || '[]');
-let customProjectNames = JSON.parse(localStorage.getItem('customProjectNames') || '{}');
-let pinnedProjects = JSON.parse(localStorage.getItem('pinnedProjects') || '[]');
-let defaultIde = localStorage.getItem('defaultIde') || 'code';
+let hiddenProjects = [];
+let knownProjects = [];
+let customProjectNames = {};
+let pinnedProjects = [];
+let defaultIde = 'code';
+
+/// Hand any remaining localStorage contents to the database once, then load
+/// everything back out of it.
+async function bootstrapState() {
+    try {
+        if (!(await invoke('db_is_migrated'))) {
+            const legacy = {
+                workspaces: JSON.parse(localStorage.getItem('workspaces') || '[]'),
+                known_projects: JSON.parse(localStorage.getItem('knownProjects') || '[]'),
+                hidden_projects: JSON.parse(localStorage.getItem('hiddenProjects') || '[]'),
+                pinned_projects: JSON.parse(localStorage.getItem('pinnedProjects') || '[]'),
+                custom_project_names: JSON.parse(localStorage.getItem('customProjectNames') || '{}'),
+                default_ide: localStorage.getItem('defaultIde'),
+                tour_completed: localStorage.getItem('tourCompleted') === 'true'
+            };
+            const moved = await invoke('db_import_legacy', { legacy: legacy });
+            if (moved > 0) console.info('Moved ' + moved + ' records into the database.');
+        }
+        stateCache = await invoke('db_load_state');
+    } catch (e) {
+        // A failure here must not blank the UI; carry on with defaults.
+        console.error('Could not load state from the database', e);
+    }
+
+    workspaces = JSON.parse(stored('workspaces', '[]'));
+    hiddenProjects = JSON.parse(stored('hiddenProjects', '[]'));
+    knownProjects = JSON.parse(stored('knownProjects', '[]'));
+    customProjectNames = JSON.parse(stored('customProjectNames', '{}'));
+    pinnedProjects = JSON.parse(stored('pinnedProjects', '[]'));
+    defaultIde = stored('defaultIde', 'code');
+}
 
 const IDE_TOOLS = [
     // GUI IDEs & Editors
@@ -133,12 +188,15 @@ const tourDesc = document.getElementById('tour-desc');
 const tourStepIndicator = document.getElementById('tour-step-indicator');
 
 
-if (localStorage.getItem('tourCompleted') !== 'true') {
-    tourWelcomeModal.style.display = 'flex';
+// Deferred: whether the tour has run is only known once state has loaded.
+function maybeShowTour() {
+    if (!storedFlag('tourCompleted')) {
+        tourWelcomeModal.style.display = 'flex';
+    }
 }
 
 document.getElementById('skip-tour-btn').addEventListener('click', () => {
-    localStorage.setItem('tourCompleted', 'true');
+    persist('tourCompleted', 'true');
     tourWelcomeModal.style.display = 'none';
 });
 
@@ -171,7 +229,7 @@ if (infoMenuBtn && infoDropdown) {
 
     if (restartTourBtnNew) {
         restartTourBtnNew.addEventListener('click', () => {
-            localStorage.removeItem('tourCompleted');
+            persist('tourCompleted', '');
             tourWelcomeModal.style.display = 'flex';
             infoDropdown.style.display = 'none';
         });
@@ -280,7 +338,7 @@ function endTour() {
     renderWorkspaces();
     renderProjects();
     
-    localStorage.setItem('tourCompleted', 'true');
+    persist('tourCompleted', 'true');
 }
 
 
@@ -374,7 +432,7 @@ function renderIdeDropdown() {
             option.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 defaultIde = tool.id;
-                localStorage.setItem('defaultIde', defaultIde);
+                persist('defaultIde', defaultIde);
                 updateMainIdeButton();
                 renderIdeDropdown();
                 renderProjects();
@@ -510,21 +568,32 @@ if (secondarySidebar) secondarySidebar.classList.add('collapsed');
 
 // Pre-populate with scratch directory as a default workspace if empty
 const defaultWorkspace = "C:\\Users\\upend\\.gemini\\antigravity\\scratch";
-if (workspaces.length === 0) {
-    workspaces.push(defaultWorkspace);
-    saveState();
+// Must run *after* bootstrapState(): an empty pre-load list would look like a
+// first run and overwrite the user's real workspaces with this one path.
+function seedDefaultWorkspace() {
+    if (workspaces.length === 0) {
+        workspaces.push(defaultWorkspace);
+        saveState();
+    }
 }
 
 function saveState() {
-    localStorage.setItem('workspaces', JSON.stringify(workspaces));
-    localStorage.setItem('hiddenProjects', JSON.stringify(hiddenProjects));
-    localStorage.setItem('knownProjects', JSON.stringify(knownProjects));
-    localStorage.setItem('customProjectNames', JSON.stringify(customProjectNames));
-    localStorage.setItem('pinnedProjects', JSON.stringify(pinnedProjects));
+    persist('workspaces', workspaces);
+    persist('hiddenProjects', hiddenProjects);
+    persist('knownProjects', knownProjects);
+    persist('customProjectNames', customProjectNames);
+    persist('pinnedProjects', pinnedProjects);
 }
 
-renderWorkspaces();
-scanAllWorkspaces();
+// Nothing may render until the database has answered, or the first paint
+// would show an empty sidebar and then snap to the real workspaces.
+bootstrapState().then(() => {
+    seedDefaultWorkspace();
+    maybeShowTour();
+    updateMainIdeButton();
+    renderWorkspaces();
+    scanAllWorkspaces();
+});
 
 runCustomCmdBtn.addEventListener('click', async () => {
     if (!activeProject) return;
@@ -635,12 +704,12 @@ if (scanSelectionSaveBtn) {
             }
         });
         
-        localStorage.setItem('hiddenProjects', JSON.stringify(hiddenProjects));
+        persist('hiddenProjects', hiddenProjects);
         
         // Add workspace
         if (tempWorkspacePath && !workspaces.includes(tempWorkspacePath)) {
             workspaces.push(tempWorkspacePath);
-            localStorage.setItem('workspaces', JSON.stringify(workspaces));
+            persist('workspaces', workspaces);
         }
         
         // Merge projects

@@ -772,6 +772,33 @@ fn set_project_visibility(
     auth::set_visibility(&state.db.lock().unwrap(), &project_key, v)
 }
 
+/// Everything the frontend needs, keyed as its old localStorage entries were.
+#[tauri::command]
+fn db_load_state(state: State<AppState>) -> HashMap<String, String> {
+    state.db.lock().unwrap().load_legacy_shape()
+}
+
+/// Persist one frontend key.
+#[tauri::command]
+fn db_save_state(state: State<AppState>, key: String, value: String) -> Result<(), String> {
+    state.db.lock().unwrap().save_legacy_key(&key, &value)
+}
+
+/// Has the one-time localStorage import already run?
+#[tauri::command]
+fn db_is_migrated(state: State<AppState>) -> bool {
+    state.db.lock().unwrap().is_migrated()
+}
+
+/// Import the browser's localStorage contents exactly once.
+///
+/// Returns how many rows were taken in, so the UI can tell the user what moved
+/// rather than silently swallowing their workspaces.
+#[tauri::command]
+fn db_import_legacy(state: State<AppState>, legacy: db::LegacyState) -> Result<usize, String> {
+    state.db.lock().unwrap().import_legacy(&legacy)
+}
+
 #[tauri::command]
 fn gateway_status(state: State<AppState>) -> gateway::GatewayInfo {
     match state.gateway.lock().unwrap().as_ref() {
@@ -1690,7 +1717,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

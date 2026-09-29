@@ -308,6 +308,125 @@ impl Db {
         Ok(())
     }
 
+
+    // ------------------------------------------------------- frontend bridge
+
+    /// Return every stored value keyed the way the frontend already expects.
+    ///
+    /// Values are JSON strings so existing `JSON.parse` call sites are
+    /// untouched; only the source of the string changes.
+    pub fn load_legacy_shape(&self) -> std::collections::HashMap<String, String> {
+        use std::collections::HashMap;
+        let mut out = HashMap::new();
+        let projects = self.projects().unwrap_or_default();
+
+        out.insert(
+            "workspaces".into(),
+            serde_json::to_string(&self.workspaces().unwrap_or_default()).unwrap_or("[]".into()),
+        );
+        out.insert(
+            "knownProjects".into(),
+            serde_json::to_string(&projects.iter().map(|p| &p.path).collect::<Vec<_>>())
+                .unwrap_or("[]".into()),
+        );
+        out.insert(
+            "hiddenProjects".into(),
+            serde_json::to_string(
+                &projects.iter().filter(|p| p.hidden).map(|p| &p.path).collect::<Vec<_>>(),
+            )
+            .unwrap_or("[]".into()),
+        );
+        out.insert(
+            "pinnedProjects".into(),
+            serde_json::to_string(
+                &projects.iter().filter(|p| p.pinned).map(|p| &p.path).collect::<Vec<_>>(),
+            )
+            .unwrap_or("[]".into()),
+        );
+        let names: std::collections::HashMap<&String, &String> = projects
+            .iter()
+            .filter_map(|p| p.custom_name.as_ref().map(|n| (&p.path, n)))
+            .collect();
+        out.insert(
+            "customProjectNames".into(),
+            serde_json::to_string(&names).unwrap_or("{}".into()),
+        );
+
+        if let Some(v) = self.setting("defaultIde") {
+            out.insert("defaultIde".into(), v);
+        }
+        if let Some(v) = self.setting("tourCompleted") {
+            out.insert("tourCompleted".into(), v);
+        }
+        out
+    }
+
+    /// Write one frontend key back to the right table.
+    ///
+    /// `value` arrives as the same JSON string the frontend used to hand to
+    /// localStorage, so call sites need no reshaping.
+    pub fn save_legacy_key(&mut self, key: &str, value: &str) -> Result<(), String> {
+        match key {
+            "workspaces" => {
+                let list: Vec<String> = serde_json::from_str(value).map_err(|e| e.to_string())?;
+                let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+                tx.execute("DELETE FROM workspaces", []).map_err(|e| e.to_string())?;
+                for w in &list {
+                    tx.execute("INSERT OR IGNORE INTO workspaces(path) VALUES (?1)", params![w])
+                        .map_err(|e| e.to_string())?;
+                }
+                tx.commit().map_err(|e| e.to_string())
+            }
+            "hiddenProjects" | "pinnedProjects" | "knownProjects" => {
+                let list: Vec<String> = serde_json::from_str(value).map_err(|e| e.to_string())?;
+                let column = match key {
+                    "hiddenProjects" => "hidden",
+                    "pinnedProjects" => "pinned",
+                    _ => {
+                        // knownProjects only needs the rows to exist.
+                        for path in &list {
+                            self.conn
+                                .execute("INSERT OR IGNORE INTO projects(path) VALUES (?1)", params![path])
+                                .map_err(|e| e.to_string())?;
+                        }
+                        return Ok(());
+                    }
+                };
+                let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+                tx.execute(&format!("UPDATE projects SET {column} = 0"), [])
+                    .map_err(|e| e.to_string())?;
+                for path in &list {
+                    tx.execute(
+                        &format!(
+                            "INSERT INTO projects(path, {column}) VALUES (?1, 1)
+                             ON CONFLICT(path) DO UPDATE SET {column} = 1"
+                        ),
+                        params![path],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                tx.commit().map_err(|e| e.to_string())
+            }
+            "customProjectNames" => {
+                let map: std::collections::HashMap<String, String> =
+                    serde_json::from_str(value).map_err(|e| e.to_string())?;
+                let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+                tx.execute("UPDATE projects SET custom_name = NULL", [])
+                    .map_err(|e| e.to_string())?;
+                for (path, name) in &map {
+                    tx.execute(
+                        "INSERT INTO projects(path, custom_name) VALUES (?1, ?2)
+                         ON CONFLICT(path) DO UPDATE SET custom_name = excluded.custom_name",
+                        params![path, name],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                tx.commit().map_err(|e| e.to_string())
+            }
+            other => self.set_setting(other, value),
+        }
+    }
+
     // ----------------------------------------------------------- migration
 
     /// Has the one-time import from localStorage already run?
@@ -473,6 +592,80 @@ mod tests {
         assert!(!d.has_session("nope"));
         d.clear_sessions().unwrap();
         assert!(!d.has_session("tok"));
+    }
+
+#[test]
+    fn bridge_round_trips_every_frontend_key() {
+        let mut d = db();
+
+        d.save_legacy_key("workspaces", r#"["D:/Projects","D:/Work"]"#).unwrap();
+        d.save_legacy_key("knownProjects", r#"["D:/a","D:/b","D:/c"]"#).unwrap();
+        d.save_legacy_key("hiddenProjects", r#"["D:/b"]"#).unwrap();
+        d.save_legacy_key("pinnedProjects", r#"["D:/a"]"#).unwrap();
+        d.save_legacy_key("customProjectNames", r#"{"D:/a":"Shop"}"#).unwrap();
+        d.save_legacy_key("defaultIde", "cursor").unwrap();
+
+        let out = d.load_legacy_shape();
+        assert_eq!(out["workspaces"], r#"["D:/Projects","D:/Work"]"#);
+        assert_eq!(out["hiddenProjects"], r#"["D:/b"]"#);
+        assert_eq!(out["pinnedProjects"], r#"["D:/a"]"#);
+        assert_eq!(out["customProjectNames"], r#"{"D:/a":"Shop"}"#);
+        assert_eq!(out["defaultIde"], "cursor");
+
+        let known: Vec<String> = serde_json::from_str(&out["knownProjects"]).unwrap();
+        assert_eq!(known.len(), 3, "known projects lost: {known:?}");
+    }
+
+    #[test]
+    fn unhiding_a_project_actually_clears_the_flag() {
+        // The frontend sends the whole list, so a removal must clear rows that
+        // are no longer in it rather than only setting the ones that are.
+        let mut d = db();
+        d.save_legacy_key("hiddenProjects", r#"["D:/a","D:/b"]"#).unwrap();
+        d.save_legacy_key("hiddenProjects", r#"["D:/a"]"#).unwrap();
+
+        assert!(d.project("D:/a").unwrap().unwrap().hidden);
+        assert!(!d.project("D:/b").unwrap().unwrap().hidden, "D:/b stayed hidden");
+    }
+
+    #[test]
+    fn renaming_then_clearing_a_name_removes_it() {
+        let mut d = db();
+        d.save_legacy_key("customProjectNames", r#"{"D:/a":"Shop","D:/b":"Api"}"#).unwrap();
+        d.save_legacy_key("customProjectNames", r#"{"D:/a":"Shop"}"#).unwrap();
+
+        assert_eq!(d.project("D:/a").unwrap().unwrap().custom_name.as_deref(), Some("Shop"));
+        assert_eq!(d.project("D:/b").unwrap().unwrap().custom_name, None);
+    }
+
+    #[test]
+    fn flags_survive_each_other() {
+        // Saving one key must not wipe another's column on the same row.
+        let mut d = db();
+        d.save_legacy_key("pinnedProjects", r#"["D:/a"]"#).unwrap();
+        d.save_legacy_key("customProjectNames", r#"{"D:/a":"Shop"}"#).unwrap();
+        d.save_legacy_key("hiddenProjects", r#"["D:/a"]"#).unwrap();
+
+        let p = d.project("D:/a").unwrap().unwrap();
+        assert!(p.pinned, "pin lost");
+        assert!(p.hidden, "hide lost");
+        assert_eq!(p.custom_name.as_deref(), Some("Shop"), "name lost");
+    }
+
+    #[test]
+    fn removing_a_workspace_from_the_list_deletes_it() {
+        let mut d = db();
+        d.save_legacy_key("workspaces", r#"["D:/a","D:/b"]"#).unwrap();
+        d.save_legacy_key("workspaces", r#"["D:/a"]"#).unwrap();
+        assert_eq!(d.workspaces().unwrap(), vec!["D:/a"]);
+    }
+
+    #[test]
+    fn malformed_json_is_an_error_not_a_wipe() {
+        let mut d = db();
+        d.save_legacy_key("workspaces", r#"["D:/a"]"#).unwrap();
+        assert!(d.save_legacy_key("workspaces", "not json").is_err());
+        assert_eq!(d.workspaces().unwrap(), vec!["D:/a"], "data lost on bad input");
     }
 
     #[test]
