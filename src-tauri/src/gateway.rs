@@ -345,6 +345,24 @@ impl Gateway {
         Ok(port)
     }
 
+/// The live preview list, for the desktop UI.
+    ///
+    /// Read straight from state rather than over HTTP: the desktop webview has
+    /// a different origin to the gateway, so fetching its own API is blocked by
+    /// CORS and looks like the gateway is unreachable.
+    pub fn preview_list(&self) -> Vec<(String, u16, String)> {
+        let host = self
+            .lan_ip
+            .map(|i| i.to_string())
+            .unwrap_or_else(|| "127.0.0.1".into());
+        self.previews
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(k, p)| (k.clone(), p.port, format!("http://{host}:{}", p.port)))
+            .collect()
+    }
+
     pub fn remove_preview(&self, key: &str) {
         if let Some(mut p) = self.previews.lock().unwrap().remove(key) {
             if let Some(tx) = p.shutdown.take() {

@@ -990,6 +990,42 @@ async fn cloud_devices(state: State<'_, AppState>) -> Result<Vec<cloud::Device>,
         .map_err(|e| format!("device lookup failed: {e}"))?
 }
 
+#[derive(serde::Serialize)]
+struct PreviewRow {
+    key: String,
+    name: String,
+    port: u16,
+    url: String,
+    /// "private" or "public".
+    visibility: String,
+}
+
+/// Live previews for the desktop panel, with each project's share setting.
+#[tauri::command]
+fn gateway_previews(state: State<AppState>) -> Vec<PreviewRow> {
+    let guard = state.gateway.lock().unwrap();
+    let Some(gw) = guard.as_ref() else {
+        return Vec::new();
+    };
+
+    let db = state.db.lock().unwrap();
+    gw.preview_list()
+        .into_iter()
+        .map(|(key, port, url)| {
+            // A key is "<path>:<script>"; show the folder name, not the path.
+            let path = key.rsplit_once(':').map(|(p, _)| p).unwrap_or(&key);
+            let name = path
+                .trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(path)
+                .to_string();
+            let visibility = db.visibility_of(&key);
+            PreviewRow { key, name, port, url, visibility }
+        })
+        .collect()
+}
+
 #[tauri::command]
 fn gateway_status(state: State<AppState>) -> gateway::GatewayInfo {
     match state.gateway.lock().unwrap().as_ref() {
@@ -1975,7 +2011,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, gateway_previews, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
