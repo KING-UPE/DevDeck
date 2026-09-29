@@ -1,4 +1,5 @@
 mod auth;
+mod db;
 mod gateway;
 mod tunnel;
 mod ports;
@@ -57,8 +58,8 @@ struct AppState {
     gateway: Arc<Mutex<Option<gateway::Gateway>>>,
     /// Public tunnels, keyed by the local port each exposes.
     tunnels: Arc<Mutex<tunnel::TunnelManager>>,
-    /// Local accounts and per-project visibility. No database; see [`auth`].
-    auth: Arc<Mutex<auth::AuthStore>>,
+    /// SQLite store: workspaces, projects, settings, account, sessions.
+    db: Arc<Mutex<db::Db>>,
 }
 
 fn update_tray_menu(app: &tauri::AppHandle) {
@@ -592,7 +593,7 @@ fn gateway_start(state: State<AppState>) -> Result<gateway::GatewayInfo, String>
     if let Some(gw) = guard.as_ref() {
         return Ok(gw.info());
     }
-    let gw = gateway::Gateway::start(state.auth.clone())?;
+    let gw = gateway::Gateway::start(state.db.clone())?;
     let info = gw.info();
     *guard = Some(gw);
     drop(guard);
@@ -712,10 +713,10 @@ struct AuthStatus {
 /// Whether an account exists, for the desktop Remote panel.
 #[tauri::command]
 fn auth_status(state: State<AppState>) -> AuthStatus {
-    let auth = state.auth.lock().unwrap();
+    let db = state.db.lock().unwrap();
     AuthStatus {
-        has_account: auth.has_account(),
-        username: auth.username().map(str::to_string),
+        has_account: auth::has_account(&db),
+        username: auth::username(&db),
     }
 }
 
@@ -728,9 +729,9 @@ async fn auth_set_account(
     username: String,
     password: String,
 ) -> Result<(), String> {
-    let auth = state.auth.clone();
+    let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        auth.lock().unwrap().set_account(&username, &password)
+        auth::set_account(&db.lock().unwrap(), &username, &password)
     })
     .await
     .map_err(|e| format!("account task failed: {e}"))?
@@ -738,25 +739,37 @@ async fn auth_set_account(
 
 /// Sign every paired device out.
 #[tauri::command]
-fn auth_revoke_sessions(state: State<AppState>) {
-    state.auth.lock().unwrap().revoke_all_sessions();
+fn auth_revoke_sessions(state: State<AppState>) -> Result<(), String> {
+    auth::revoke_all_sessions(&state.db.lock().unwrap())
 }
 
 /// Per-project visibility, keyed by process key.
 #[tauri::command]
-fn project_visibility(state: State<AppState>) -> HashMap<String, auth::Visibility> {
-    state.auth.lock().unwrap().all_visibility()
+fn project_visibility(state: State<AppState>) -> HashMap<String, String> {
+    state
+        .db
+        .lock()
+        .unwrap()
+        .projects()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| (p.path, p.visibility))
+        .collect()
 }
 
 /// Mark a project public (viewable without signing in) or private.
 #[tauri::command]
-fn set_project_visibility(state: State<AppState>, project_key: String, public: bool) {
+fn set_project_visibility(
+    state: State<AppState>,
+    project_key: String,
+    public: bool,
+) -> Result<(), String> {
     let v = if public {
         auth::Visibility::Public
     } else {
         auth::Visibility::Private
     };
-    state.auth.lock().unwrap().set_visibility(&project_key, v);
+    auth::set_visibility(&state.db.lock().unwrap(), &project_key, v)
 }
 
 #[tauri::command]
@@ -1606,7 +1619,9 @@ pub fn run() {
             detected_ports: Arc::new(Mutex::new(HashMap::new())),
             gateway: Arc::new(Mutex::new(None)),
             tunnels: Arc::new(Mutex::new(tunnel::TunnelManager::default())),
-            auth: Arc::new(Mutex::new(auth::AuthStore::load())),
+            db: Arc::new(Mutex::new(
+                db::Db::open().expect("could not open the DevDeck database"),
+            )),
         })
         .setup(|app| {
             let _tray = tauri::tray::TrayIconBuilder::with_id("main")

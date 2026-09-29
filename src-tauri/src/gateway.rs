@@ -15,7 +15,8 @@
 //! and costs nothing. Auth still works across all of them because browsers
 //! scope cookies by host and *ignore* the port.
 
-use crate::auth::{AuthStore, Visibility};
+use crate::auth::{self, Visibility};
+use crate::db::Db;
 use axum::{
     extract::{Query, Request, State},
     middleware::{self, Next},
@@ -54,7 +55,7 @@ pub struct Gateway {
     bind: IpAddr,
     runtime: Arc<tokio::runtime::Runtime>,
     previews: Arc<Mutex<HashMap<String, Preview>>>,
-    auth: Arc<Mutex<AuthStore>>,
+    db: Arc<Mutex<Db>>,
     control_shutdown: Option<oneshot::Sender<()>>,
     control_port: u16,
 }
@@ -64,14 +65,14 @@ struct ControlState {
     token: String,
     previews: Arc<Mutex<HashMap<String, Preview>>>,
     lan_ip: Option<IpAddr>,
-    auth: Arc<Mutex<AuthStore>>,
+    db: Arc<Mutex<Db>>,
 }
 
 /// State for one project's preview listener.
 #[derive(Clone)]
 struct PreviewState {
     project_key: String,
-    auth: Arc<Mutex<AuthStore>>,
+    db: Arc<Mutex<Db>>,
 }
 
 /// What the desktop UI needs to render the pairing panel.
@@ -115,14 +116,14 @@ fn lan_ip() -> Option<IpAddr> {
 impl Gateway {
     /// Bind the control plane and return a handle. Preview planes start later,
     /// as ports are detected.
-    pub fn start(auth: Arc<Mutex<AuthStore>>) -> Result<Self, String> {
-        Self::start_on(IpAddr::from([0, 0, 0, 0]), CONTROL_PORT, auth)
+    pub fn start(db: Arc<Mutex<Db>>) -> Result<Self, String> {
+        Self::start_on(IpAddr::from([0, 0, 0, 0]), CONTROL_PORT, db)
     }
 
     pub fn start_on(
         bind: IpAddr,
         control_port: u16,
-        auth: Arc<Mutex<AuthStore>>,
+        db: Arc<Mutex<Db>>,
     ) -> Result<Self, String> {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -141,7 +142,7 @@ impl Gateway {
             token: token.clone(),
             previews: previews.clone(),
             lan_ip: ip,
-            auth: auth.clone(),
+            db: db.clone(),
         };
 
         // The shell, its assets and the session endpoints stay public: the
@@ -187,7 +188,7 @@ impl Gateway {
 
         Ok(Gateway {
             bind,
-            auth,
+            db,
             token,
             lan_ip: ip,
             runtime,
@@ -222,7 +223,7 @@ impl Gateway {
         // tunnel URL - could read the dev server directly.
         let pstate = PreviewState {
             project_key: key.to_string(),
-            auth: self.auth.clone(),
+            db: self.db.clone(),
         };
         let proxy: Router = ReverseProxy::new("/", &upstream).into();
         // Capture the per-project state in a closure rather than using
@@ -324,13 +325,13 @@ async fn require_session(
     next: Next,
 ) -> Response {
     let ok = session_cookie(&req)
-        .map(|t| st.auth.lock().unwrap().is_valid_session(&t))
+        .map(|t| auth::is_valid_session(&st.db.lock().unwrap(), &t))
         .unwrap_or(false);
 
     // With no account configured the gateway is LAN-convenience only, so the
     // pairing token alone is enough; demanding a login the user never created
     // would lock them out of their own machine.
-    let no_account = !st.auth.lock().unwrap().has_account();
+    let no_account = !auth::has_account(&st.db.lock().unwrap());
 
     if ok || no_account {
         next.run(req).await
@@ -345,17 +346,17 @@ async fn require_preview_access(st: PreviewState, req: Request, next: Next) -> R
     // std MutexGuard across one makes the future non-Send, and axum requires
     // Send futures.
     let allow_anonymous = {
-        let auth = st.auth.lock().unwrap();
-        auth.visibility_of(&st.project_key) == Visibility::Public || !auth.has_account()
+        let db = st.db.lock().unwrap();
+        auth::visibility_of(&db, &st.project_key) == Visibility::Public || !auth::has_account(&db)
     };
     if allow_anonymous {
         return next.run(req).await;
     }
 
     let ok = {
-        let auth = st.auth.lock().unwrap();
+        let db = st.db.lock().unwrap();
         session_cookie(&req)
-            .map(|t| auth.is_valid_session(&t))
+            .map(|t| auth::is_valid_session(&db, &t))
             .unwrap_or(false)
     };
 
@@ -378,14 +379,14 @@ struct SessionInfo {
 }
 
 async fn session_info(State(st): State<ControlState>, req: Request) -> Json<SessionInfo> {
-    let auth = st.auth.lock().unwrap();
+    let db = st.db.lock().unwrap();
     let authenticated = session_cookie(&req)
-        .map(|t| auth.is_valid_session(&t))
+        .map(|t| auth::is_valid_session(&db, &t))
         .unwrap_or(false);
     Json(SessionInfo {
         authenticated,
-        has_account: auth.has_account(),
-        username: auth.username().map(str::to_string),
+        has_account: auth::has_account(&db),
+        username: auth::username(&db),
     })
 }
 
@@ -396,7 +397,7 @@ struct LoginBody {
 }
 
 async fn login(State(st): State<ControlState>, Json(body): Json<LoginBody>) -> Response {
-    match st.auth.lock().unwrap().login(&body.username, &body.password) {
+    match auth::login(&st.db.lock().unwrap(), &body.username, &body.password) {
         Ok(token) => (
             [(
                 header::SET_COOKIE,
@@ -422,7 +423,7 @@ async fn index(State(st): State<ControlState>, Query(q): Query<AuthQuery>) -> Re
         if t == st.token {
             // Trade the pairing token for a real session, so revoking sessions
             // logs paired phones out without having to rotate the QR.
-            let session = st.auth.lock().unwrap().mint_session();
+            let session = auth::mint_session(&st.db.lock().unwrap()).unwrap_or_default();
             return (
                 [(
                     header::SET_COOKIE,
@@ -564,7 +565,7 @@ mod tests {
         Gateway::start_on(
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             0,
-            Arc::new(Mutex::new(AuthStore::default())),
+            Arc::new(Mutex::new(Db::open_in_memory().unwrap())),
         )
         .unwrap()
     }
@@ -653,17 +654,17 @@ mod tests {
         assert!(body.contains("proj:dev"), "preview missing from list: {body}");
     }
 
-/// Build a gateway whose auth store has a real account configured.
-    fn gateway_with_account() -> (Gateway, Arc<Mutex<AuthStore>>) {
-        let auth = Arc::new(Mutex::new(AuthStore::default()));
-        auth.lock().unwrap().set_account("upe", "correct-horse").unwrap();
-        let gw = Gateway::start_on(IpAddr::V4(Ipv4Addr::LOCALHOST), 0, auth.clone()).unwrap();
-        (gw, auth)
+    /// A gateway backed by an in-memory database with an account configured.
+    fn gateway_with_account() -> (Gateway, Arc<Mutex<Db>>) {
+        let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
+        auth::set_account(&db.lock().unwrap(), "upe", "correct-horse").unwrap();
+        let gw = Gateway::start_on(IpAddr::V4(Ipv4Addr::LOCALHOST), 0, db.clone()).unwrap();
+        (gw, db)
     }
 
     #[test]
     fn a_private_project_refuses_anonymous_viewers() {
-        let (gw, _auth) = gateway_with_account();
+        let (gw, _db) = gateway_with_account();
         let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
 
         let resp = get(port, "/");
@@ -673,9 +674,9 @@ mod tests {
 
     #[test]
     fn a_signed_in_viewer_reaches_a_private_project() {
-        let (gw, auth) = gateway_with_account();
+        let (gw, db) = gateway_with_account();
         let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
-        let token = auth.lock().unwrap().login("upe", "correct-horse").unwrap();
+        let token = auth::login(&db.lock().unwrap(), "upe", "correct-horse").unwrap();
 
         let resp = get_auth(port, "/", &token);
         assert!(resp.contains("200 OK"), "signed-in viewer blocked: {resp}");
@@ -684,8 +685,8 @@ mod tests {
 
     #[test]
     fn a_public_project_is_viewable_without_signing_in() {
-        let (gw, auth) = gateway_with_account();
-        auth.lock().unwrap().set_visibility("demo:dev", Visibility::Public);
+        let (gw, db) = gateway_with_account();
+        auth::set_visibility(&db.lock().unwrap(), "demo:dev", Visibility::Public).unwrap();
         let port = gw.add_preview("demo:dev", spawn_upstream("client demo")).unwrap();
 
         let resp = get(port, "/");
@@ -695,25 +696,25 @@ mod tests {
 
     #[test]
     fn a_stale_session_stops_working_after_a_password_change() {
-        let (gw, auth) = gateway_with_account();
+        let (gw, db) = gateway_with_account();
         let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
-        let token = auth.lock().unwrap().login("upe", "correct-horse").unwrap();
+        let token = auth::login(&db.lock().unwrap(), "upe", "correct-horse").unwrap();
         assert!(get_auth(port, "/", &token).contains("200 OK"));
 
-        auth.lock().unwrap().set_account("upe", "a-brand-new-one").unwrap();
+        auth::set_account(&db.lock().unwrap(), "upe", "a-brand-new-one").unwrap();
         let resp = get_auth(port, "/", &token);
         assert!(resp.contains("401"), "revoked session still worked: {resp}");
     }
 
     #[test]
     fn the_project_list_needs_a_session_once_an_account_exists() {
-        let (gw, auth) = gateway_with_account();
+        let (gw, db) = gateway_with_account();
         gw.add_preview("secret:dev", spawn_upstream("x")).unwrap();
 
         let anon = get(gw.control_port, "/api/previews");
         assert!(anon.contains("401"), "project list leaked anonymously: {anon}");
 
-        let token = auth.lock().unwrap().login("upe", "correct-horse").unwrap();
+        let token = auth::login(&db.lock().unwrap(), "upe", "correct-horse").unwrap();
         let signed = get_auth(gw.control_port, "/api/previews", &token);
         assert!(signed.contains("secret:dev"), "signed-in list empty: {signed}");
     }

@@ -41,3 +41,7 @@ qrcode = "0.14"
 argon2 = { version = "0.6", features = ["getrandom"] }
 getrandom = "0.4"
 
+# SQLite, compiled into the binary. "bundled" means no server, no system
+# SQLite, and nothing for users to install.
+rusqlite = { version = "0.40", features = ["bundled"] }
+
