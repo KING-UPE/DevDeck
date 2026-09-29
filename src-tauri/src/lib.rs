@@ -613,9 +613,11 @@ fn gateway_start(
     let controls = {
         let stop_app = app.clone();
         let restart_app = app.clone();
+        let start_app = app.clone();
         gateway::Controls {
             stop: Arc::new(move |key: String| halt_process(&stop_app, &key)),
             restart: Arc::new(move |key: String| restart_process(&restart_app, &key)),
+            start: Arc::new(move |key: String| begin_process(&start_app, &key)),
         }
     };
     let gw = gateway::Gateway::start(state.db.clone(), state.processes.clone(), controls)?;
@@ -1038,6 +1040,17 @@ fn gateway_previews(state: State<AppState>) -> Vec<PreviewRow> {
         .collect()
 }
 
+/// Persist what a scan found so the gateway can offer projects the phone has
+/// never started.
+#[tauri::command]
+fn save_scanned_projects(state: State<AppState>, projects: Vec<ProjectInfo>) -> Result<usize, String> {
+    let rows: Vec<(String, String, HashMap<String, String>)> = projects
+        .into_iter()
+        .map(|p| (p.path, p.project_type, p.scripts))
+        .collect();
+    state.db.lock().unwrap().save_scanned(&rows)
+}
+
 #[tauri::command]
 fn gateway_status(state: State<AppState>) -> gateway::GatewayInfo {
     match state.gateway.lock().unwrap().as_ref() {
@@ -1205,6 +1218,35 @@ pub(crate) fn restart_process(app: &AppHandle, key: &str) -> Result<(), String> 
     thread::sleep(std::time::Duration::from_millis(600));
 
     launch_tracked(app, &state, &path, &script, &cmd)
+}
+
+/// Start one of a project's scripts, from the desktop or the phone.
+///
+/// Looks the command up from the stored scan rather than trusting the caller
+/// to supply one, so the gateway can never be used to run arbitrary shell.
+pub(crate) fn begin_process(app: &AppHandle, key: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+
+    if state.active_processes.lock().unwrap().contains_key(key) {
+        return Err("That script is already running".into());
+    }
+
+    let (path, script) = key
+        .rfind(':')
+        .filter(|i| *i > 2)
+        .map(|i| (key[..i].to_string(), key[i + 1..].to_string()))
+        .ok_or("Malformed project key")?;
+
+    let command = {
+        let db = state.db.lock().unwrap();
+        db.project(&path)
+            .ok()
+            .flatten()
+            .and_then(|p| p.scripts.get(&script).cloned())
+            .ok_or("DevDeck does not know that script. Rescan the workspace on your PC.")?
+    };
+
+    launch_tracked(app, &state, &path, &script, &command)
 }
 
 #[tauri::command]
@@ -2023,7 +2065,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, gateway_previews, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, cloud_reset_password, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, gateway_previews, save_scanned_projects, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, cloud_reset_password, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

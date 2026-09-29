@@ -50,6 +50,7 @@ const SESSION_COOKIE: &str = "devdeck_session";
 pub struct Controls {
     pub stop: Arc<dyn Fn(String) + Send + Sync>,
     pub restart: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
+    pub start: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
 }
 
 /// A single project's preview server.
@@ -188,6 +189,8 @@ impl Gateway {
             .route("/api/logs/poll", get(poll_logs))
             .route("/api/process/stop", axum::routing::post(stop_process))
             .route("/api/process/restart", axum::routing::post(restart_process))
+            .route("/api/process/start", axum::routing::post(start_process))
+            .route("/api/projects", get(list_projects))
             .layer(middleware::from_fn_with_state(state.clone(), require_session));
 
         let app = Router::new()
@@ -403,6 +406,112 @@ pub fn qr_svg(data: &str) -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------- handlers
+
+#[derive(Serialize)]
+struct ProjectScript {
+    name: String,
+    /// Port this script's server is on, when it is running.
+    port: Option<u16>,
+    url: Option<String>,
+    running: bool,
+}
+
+#[derive(Serialize)]
+struct ProjectRow {
+    path: String,
+    name: String,
+    kind: String,
+    visibility: String,
+    scripts: Vec<ProjectScript>,
+    /// True when any of its scripts is running.
+    running: bool,
+}
+
+/// Every project the desktop has scanned, whether running or not.
+///
+/// This is what lets the phone start something rather than only watch what was
+/// already started at the desk.
+async fn list_projects(State(st): State<ControlState>) -> Json<Vec<ProjectRow>> {
+    let host = st
+        .lan_ip
+        .map(|i| i.to_string())
+        .unwrap_or_else(|| "127.0.0.1".into());
+
+    // Which process keys currently have a preview, and on what port.
+    let live: HashMap<String, u16> = st
+        .previews
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, p)| (k.clone(), p.port))
+        .collect();
+
+    let db = st.db.lock().unwrap();
+    let mut rows: Vec<ProjectRow> = db
+        .projects()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| !p.hidden && !p.scripts.is_empty())
+        .map(|p| {
+            let mut scripts: Vec<ProjectScript> = p
+                .scripts
+                .keys()
+                .map(|name| {
+                    let key = format!("{}:{}", p.path, name);
+                    let port = live.get(&key).copied();
+                    ProjectScript {
+                        name: name.clone(),
+                        url: port.map(|n| format!("http://{host}:{n}")),
+                        running: port.is_some(),
+                        port,
+                    }
+                })
+                .collect();
+            scripts.sort_by(|a, b| a.name.cmp(&b.name));
+
+            let display = p.custom_name.clone().unwrap_or_else(|| {
+                p.path
+                    .trim_end_matches(['/', '\\'])
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(&p.path)
+                    .to_string()
+            });
+
+            ProjectRow {
+                running: scripts.iter().any(|s| s.running),
+                path: p.path,
+                name: display,
+                kind: p.project_type,
+                visibility: p.visibility,
+                scripts,
+            }
+        })
+        .collect();
+
+    // Running first, then alphabetical: what is live is what you came for.
+    rows.sort_by(|a, b| b.running.cmp(&a.running).then(a.name.cmp(&b.name)));
+    Json(rows)
+}
+
+async fn start_process(State(st): State<ControlState>, Query(q): Query<KeyQuery>) -> Response {
+    let Some(c) = st.controls.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not available").into_response();
+    };
+    let key = q.key.clone();
+    let result = tokio::task::spawn_blocking(move || (c.start)(key)).await;
+
+    match result {
+        Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(Err(e)) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 
 #[derive(serde::Deserialize)]
 struct CloudLoginBody {

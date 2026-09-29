@@ -123,6 +123,43 @@
   }
   .chev { flex: none; color: var(--dim); }
 
+/* ---------- project rows ---------- */
+  .proj {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; margin-bottom: 10px; overflow: hidden;
+  }
+  .proj-head {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 14px; background: none; border: 0; color: inherit;
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  .proj-head:active { background: var(--surface-2); }
+  .proj-name { display: block; font-weight: 600; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .proj-kind { display: block; font-size: .74rem; color: var(--dim); margin-top: 3px; }
+  .caret { color: var(--dim); transition: transform .18s ease; flex: none; }
+  .proj.open .caret { transform: rotate(90deg); }
+
+  .proj-body { display: none; padding: 0 14px 12px; }
+  .proj.open .proj-body { display: block; }
+
+  .script {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 0; border-top: 1px solid var(--border);
+  }
+  .script-name { flex: 1; min-width: 0; font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini {
+    flex: none; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text);
+    font: 600 .76rem/1 inherit; cursor: pointer;
+  }
+  .mini:active { opacity: .7; }
+  .mini.go { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mini:disabled { opacity: .5; }
+  .mini.icon { padding: 7px 9px; }
+  .running-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none;
+  }
+
   /* ---------- states ---------- */
   .empty { text-align: center; padding: 72px 24px; color: var(--muted); }
   .empty svg { width: 44px; height: 44px; color: var(--dim); margin-bottom: 14px; }
@@ -213,27 +250,41 @@
 <!-- ============ login ============ -->
 <section class="screen" id="login-screen">
   <div class="wrap">
-    <h2>Sign in to DevDeck</h2>
-    <p>Use the account you created on your PC.</p>
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+      </svg>
+    </div>
+    <h2>DevDeck</h2>
+    <p class="lead">Sign in to reach the projects on your PC.</p>
+
     <div id="cloud-form" style="display:none;">
       <input class="field" id="cl-email" type="email" autocomplete="username"
-             autocapitalize="none" autocorrect="off" placeholder="Email" style="margin-bottom:12px;" />
-      <input class="field" id="cl-pass" type="password" autocomplete="current-password"
-             placeholder="Password" />
+             autocapitalize="none" autocorrect="off" placeholder="Email" />
+      <div class="pw">
+        <input class="field" id="cl-pass" type="password" autocomplete="current-password" placeholder="Password" />
+        <button id="cl-eye" type="button" aria-label="Show password">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        </button>
+      </div>
       <p class="err" id="cl-err"></p>
       <button class="primary" id="cl-go">Sign in</button>
-      <button id="use-local" style="margin-top:14px;background:none;border:0;color:var(--dim);font:inherit;font-size:.8rem;cursor:pointer;">
-        Use this PC's password instead
-      </button>
+      <button class="link" id="use-local">Use this PC&rsquo;s password instead</button>
     </div>
 
     <div id="local-form">
-    <input class="field" id="lg-user" type="text" autocomplete="username"
-           autocapitalize="none" autocorrect="off" placeholder="Username" />
-    <input class="field" id="lg-pass" type="password" autocomplete="current-password"
-           placeholder="Password" />
-    <p class="err" id="lg-err"></p>
-    <button class="primary" id="lg-go">Sign in</button>
+      <input class="field" id="lg-user" type="text" autocomplete="username"
+             autocapitalize="none" autocorrect="off" placeholder="Username" />
+      <div class="pw">
+        <input class="field" id="lg-pass" type="password" autocomplete="current-password" placeholder="Password" />
+        <button id="lg-eye" type="button" aria-label="Show password">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        </button>
+      </div>
+      <p class="err" id="lg-err"></p>
+      <button class="primary" id="lg-go">Sign in</button>
     </div>
   </div>
 </section>
@@ -332,37 +383,60 @@
     });
   }
 
-  function render(items) {
-    /* Skip the DOM churn when nothing changed - it would kill scroll position
-       and restart the press animation mid-tap. */
-    var sig = items.map(function (p) { return p.key + p.port; }).join('|');
+  var openPaths = {};
+
+  function render(rows) {
+    /* Skipping identical renders keeps scroll position and stops a tap's
+       press state being wiped mid-gesture. */
+    var sig = JSON.stringify(rows.map(function (r) {
+      return [r.path, r.scripts.map(function (x) { return x.name + (x.running ? '1' : '0'); })];
+    }));
     if (sig === lastSig) return;
     lastSig = sig;
 
-    if (!items.length) {
+    if (!rows.length) {
       list.innerHTML =
         '<div class="empty">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>' +
-        '<strong>Nothing running</strong>' +
-        '<p>Start a project on your PC and it shows up here.</p></div>';
+        '<strong>No projects yet</strong>' +
+        '<p>Add a workspace on your PC and scan it. Your projects show up here.</p></div>';
       return;
     }
 
-    list.innerHTML = items.map(function (p) {
-      var k = parseKey(p.key);
-      return '<button class="card" data-url="' + esc(p.url) + '" data-name="' + esc(k.name) + '">' +
-               '<div class="body">' +
-                 '<div class="name">' + esc(k.name) + '</div>' +
-                 '<div class="meta">' + esc(k.script || k.path) + ' &middot; port ' + p.port + '</div>' +
-               '</div>' +
-               '<button class="iconbtn logs-btn" data-key="' + esc(p.key) + '" aria-label="Logs">' +
-               '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>' +
-             '</button>' +
-             '<span class="pill">LIVE</span>' +
-               '<span class="chev">' +
-                 '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>' +
-               '</span>' +
-             '</button>';
+    list.innerHTML = rows.map(function (r) {
+      var open = openPaths[r.path] ? ' open' : '';
+      var scripts = r.scripts.map(function (sc) {
+        var key = r.path + ':' + sc.name;
+        if (sc.running) {
+          return '<div class="script">' +
+            '<span class="running-dot"></span>' +
+            '<span class="script-name">' + esc(sc.name) + '</span>' +
+            '<button class="mini go" data-act="open" data-url="' + esc(sc.url) + '" data-name="' + esc(r.name) + '">Preview</button>' +
+            '<button class="mini icon" data-act="logs" data-key="' + esc(key) + '" aria-label="Logs">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>' +
+            '</button>' +
+            '<button class="mini icon" data-act="stop" data-key="' + esc(key) + '" aria-label="Stop">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>' +
+            '</button>' +
+          '</div>';
+        }
+        return '<div class="script">' +
+          '<span class="script-name">' + esc(sc.name) + '</span>' +
+          '<button class="mini go" data-act="start" data-key="' + esc(key) + '">Start</button>' +
+        '</div>';
+      }).join('');
+
+      return '<div class="proj' + open + '" data-path="' + esc(r.path) + '">' +
+        '<button class="proj-head" data-act="toggle">' +
+          (r.running ? '<span class="running-dot"></span>' : '') +
+          '<span style="flex:1;min-width:0;">' +
+            '<span class="proj-name">' + esc(r.name) + '</span>' +
+            '<span class="proj-kind">' + esc(r.kind || 'Project') + '</span>' +
+          '</span>' +
+          '<span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>' +
+        '</button>' +
+        '<div class="proj-body">' + scripts + '</div>' +
+      '</div>';
     }).join('');
   }
 
@@ -373,7 +447,7 @@
 
   async function load() {
     try {
-      var r = await fetch('/api/previews', { cache: 'no-store' });
+      var r = await fetch('/api/projects', { cache: 'no-store' });
       if (r.status === 401) { document.body.classList.add('needs-login'); return; }
       if (!r.ok) throw new Error(r.status);
       render(await r.json());
@@ -408,11 +482,40 @@
     setTimeout(function () { if (!document.body.classList.contains('previewing')) frame.src = 'about:blank'; }, 300);
   }
 
-  list.addEventListener('click', function (e) {
-    var logs = e.target.closest('.logs-btn');
-    if (logs) { openLogs(logs.dataset.key); return; }
-    var card = e.target.closest('.card');
-    if (card) openPreview(card.dataset.url, card.dataset.name);
+  list.addEventListener('click', async function (e) {
+    var btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    var act = btn.dataset.act;
+
+    if (act === 'toggle') {
+      var card = btn.closest('.proj');
+      var path = card.dataset.path;
+      openPaths[path] = !openPaths[path];
+      card.classList.toggle('open');
+      return;
+    }
+    if (act === 'open')  { openPreview(btn.dataset.url, btn.dataset.name); return; }
+    if (act === 'logs')  { openLogs(btn.dataset.key); return; }
+
+    /* start and stop both take a moment; say so rather than looking stuck. */
+    var original = btn.textContent;
+    btn.disabled = true;
+    if (act === 'start') btn.textContent = 'Starting\u2026';
+    try {
+      var r = await fetch('/api/process/' + act + '?key=' + encodeURIComponent(btn.dataset.key), { method: 'POST' });
+      if (!r.ok) {
+        var body = await r.json().catch(function () { return {}; });
+        throw new Error(body.error || ('Could not ' + act));
+      }
+      /* A dev server needs a moment to bind before its preview exists. */
+      lastSig = '';
+      setTimeout(load, act === 'start' ? 1500 : 400);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
   });
 
   document.getElementById('back').addEventListener('click', function () { history.back(); });
@@ -627,6 +730,20 @@
   document.getElementById('lg-pass').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') document.getElementById('lg-go').click();
   });
+
+  /* Show-password toggle on both sign-in forms. */
+  function wireEye(eyeId, fieldId) {
+    var eye = document.getElementById(eyeId);
+    var field = document.getElementById(fieldId);
+    if (!eye || !field) return;
+    eye.addEventListener('click', function () {
+      var showing = field.type === 'text';
+      field.type = showing ? 'password' : 'text';
+      eye.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    });
+  }
+  wireEye('cl-eye', 'cl-pass');
+  wireEye('lg-eye', 'lg-pass');
 
   /* ---------- lifecycle ---------- */
   checkSession().then(load);

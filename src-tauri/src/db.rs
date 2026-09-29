@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Bump when the schema changes and add a matching arm in [`migrate`].
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 pub struct Db {
     conn: Connection,
@@ -28,6 +28,12 @@ pub struct Project {
     pub pinned: bool,
     /// "private" or "public" - see [`crate::auth::Visibility`].
     pub visibility: String,
+    /// e.g. "Node.js", "Tauri (Rust+Node)". Empty until first scanned.
+    #[serde(default)]
+    pub project_type: String,
+    /// Script name to command, as the scanner found them.
+    #[serde(default)]
+    pub scripts: std::collections::HashMap<String, String>,
 }
 
 /// The shape the frontend sends when handing over its localStorage contents.
@@ -41,6 +47,13 @@ pub struct LegacyState {
     pub custom_project_names: std::collections::HashMap<String, String>,
     pub default_ide: Option<String>,
     pub tour_completed: Option<bool>,
+}
+
+
+/// Scripts are stored as a JSON object; a missing or corrupt value is simply
+/// "no scripts" rather than a failure to list the project at all.
+fn parse_scripts(raw: Option<String>) -> std::collections::HashMap<String, String> {
+    raw.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
 fn db_path() -> Option<PathBuf> {
@@ -128,6 +141,19 @@ impl Db {
                 .map_err(|e| format!("schema migration failed: {e}"))?;
         }
 
+        if current < 2 {
+            // The scan result used to live only in the frontend's memory, so
+            // the gateway could not offer a project the phone had not already
+            // started. Storing it makes the full list reachable from anywhere.
+            // ALTER is wrapped because a re-run on a v2 database would error.
+            let _ = self
+                .conn
+                .execute("ALTER TABLE projects ADD COLUMN project_type TEXT", []);
+            let _ = self
+                .conn
+                .execute("ALTER TABLE projects ADD COLUMN scripts TEXT", []);
+        }
+
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| e.to_string())?;
@@ -166,7 +192,10 @@ impl Db {
     pub fn projects(&self) -> Result<Vec<Project>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT path, custom_name, hidden, pinned, visibility FROM projects")
+            .prepare(
+                "SELECT path, custom_name, hidden, pinned, visibility, project_type, scripts
+                 FROM projects",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
@@ -176,6 +205,8 @@ impl Db {
                     hidden: r.get::<_, i64>(2)? != 0,
                     pinned: r.get::<_, i64>(3)? != 0,
                     visibility: r.get(4)?,
+                    project_type: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                    scripts: parse_scripts(r.get::<_, Option<String>>(6)?),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -185,7 +216,8 @@ impl Db {
     pub fn project(&self, path: &str) -> Result<Option<Project>, String> {
         self.conn
             .query_row(
-                "SELECT path, custom_name, hidden, pinned, visibility FROM projects WHERE path = ?1",
+                "SELECT path, custom_name, hidden, pinned, visibility, project_type, scripts
+                 FROM projects WHERE path = ?1",
                 params![path],
                 |r| {
                     Ok(Project {
@@ -194,6 +226,8 @@ impl Db {
                         hidden: r.get::<_, i64>(2)? != 0,
                         pinned: r.get::<_, i64>(3)? != 0,
                         visibility: r.get(4)?,
+                        project_type: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                        scripts: parse_scripts(r.get::<_, Option<String>>(6)?),
                     })
                 },
             )
@@ -239,6 +273,30 @@ impl Db {
             .flatten()
             .map(|p| p.visibility)
             .unwrap_or_else(|| "private".to_string())
+    }
+
+
+    /// Record what a scan found, without disturbing the user's own settings.
+    ///
+    /// Hidden, pinned, custom name and visibility are deliberately untouched:
+    /// a rescan describes what is on disk, not what the user decided about it.
+    pub fn save_scanned(&mut self, found: &[(String, String, std::collections::HashMap<String, String>)]) -> Result<usize, String> {
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        for (path, kind, scripts) in found {
+            let json = serde_json::to_string(scripts).unwrap_or_else(|_| "{}".into());
+            tx.execute(
+                "INSERT INTO projects(path, project_type, scripts, last_seen)
+                 VALUES (?1, ?2, ?3, strftime('%s','now'))
+                 ON CONFLICT(path) DO UPDATE SET
+                     project_type = excluded.project_type,
+                     scripts      = excluded.scripts,
+                     last_seen    = excluded.last_seen",
+                params![path, kind, json],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(found.len())
     }
 
     // ------------------------------------------------------------ settings

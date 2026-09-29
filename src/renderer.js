@@ -566,6 +566,18 @@ if (closeSecondarySidebarBtn) {
 // Initial state
 if (secondarySidebar) secondarySidebar.classList.add('collapsed');
 
+/// Hand the scan result to the backend.
+///
+/// Until this runs the gateway has no idea a project exists, so the phone can
+/// only ever see servers that were already started at the desk.
+async function persistScannedProjects() {
+    try {
+        await invoke('save_scanned_projects', { projects: allProjects });
+    } catch (e) {
+        console.error('Could not save the scanned projects', e);
+    }
+}
+
 function saveState() {
     persist('workspaces', workspaces);
     persist('hiddenProjects', hiddenProjects);
@@ -705,6 +717,7 @@ if (scanSelectionSaveBtn) {
             const existingPaths = new Set(allProjects.map(p => p.path));
             const uniqueNewProjects = tempScannedProjects.filter(p => !existingPaths.has(p.path));
             allProjects = [...allProjects, ...uniqueNewProjects];
+            persistScannedProjects();
         }
         
         scanSelectionModal.style.display = 'none';
@@ -857,6 +870,7 @@ async function scanAllWorkspaces() {
     const newProjects = tempProjects.filter(p => !isPathInArray(knownProjects, p.path));
     
     allProjects = tempProjects;
+    persistScannedProjects();
     
     // Auto-update filter dropdown
     updateTypeFilterDropdown();
