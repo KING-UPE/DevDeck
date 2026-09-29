@@ -204,6 +204,7 @@ impl Gateway {
             .route("/api/login", axum::routing::post(login))
             .route("/api/cloud-login", axum::routing::post(cloud_login))
             .merge(protected)
+            .layer(middleware::from_fn(allow_cross_origin))
             .with_state(state);
 
         let (tx, rx) = oneshot::channel::<()>();
@@ -407,6 +408,42 @@ pub fn qr_svg(data: &str) -> Result<String, String> {
 
 // ---------------------------------------------------------------- handlers
 
+/// Allow a packaged app to call this gateway from its own origin.
+///
+/// Deliberately not credentialed: `*` and cookies are mutually exclusive by
+/// spec, and auth travels as a bearer token instead. Reaching an endpoint
+/// still requires a valid session, so a wide origin grants nothing on its own.
+async fn allow_cross_origin(req: Request, next: Next) -> Response {
+    let preflight = req.method() == axum::http::Method::OPTIONS;
+
+    let mut res = if preflight {
+        // Answer the preflight here; routing it would 405.
+        Response::new(Body::empty())
+    } else {
+        next.run(req).await
+    };
+
+    let h = res.headers_mut();
+    h.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        axum::http::HeaderValue::from_static("*"),
+    );
+    h.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        axum::http::HeaderValue::from_static("GET, POST, OPTIONS"),
+    );
+    h.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        axum::http::HeaderValue::from_static("Authorization, Content-Type"),
+    );
+    h.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        axum::http::HeaderValue::from_static("86400"),
+    );
+    res
+}
+
+
 #[derive(Serialize)]
 struct ProjectScript {
     name: String,
@@ -578,7 +615,7 @@ async fn cloud_login(State(st): State<ControlState>, Json(body): Json<CloudLogin
             header::SET_COOKIE,
             format!("{SESSION_COOKIE}={session}; Path=/; Max-Age=31536000; SameSite=Lax"),
         )],
-        Json(serde_json::json!({ "ok": true })),
+        Json(serde_json::json!({ "ok": true, "token": session })),
     )
         .into_response()
 }
@@ -710,13 +747,31 @@ fn session_cookie(req: &Request) -> Option<String> {
         .map(|(_, v)| v.to_string())
 }
 
+/// Read a session token from an `Authorization: Bearer` header.
+///
+/// The packaged app runs on its own origin, so its requests are cross-site and
+/// a cookie would be dropped. A bearer token travels in a header instead,
+/// which also means the API never has to opt into credentialed CORS.
+fn bearer_token(req: &Request) -> Option<String> {
+    let raw = req.headers().get(header::AUTHORIZATION)?.to_str().ok()?;
+    raw.strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+/// Whichever the caller supplied.
+fn request_session(req: &Request) -> Option<String> {
+    bearer_token(req).or_else(|| session_cookie(req))
+}
+
 /// Gate the control plane's data endpoints on a valid session.
 async fn require_session(
     State(st): State<ControlState>,
     req: Request,
     next: Next,
 ) -> Response {
-    let ok = session_cookie(&req)
+    let ok = request_session(&req)
         .map(|t| auth::is_valid_session(&st.db.lock().unwrap(), &t))
         .unwrap_or(false);
 
@@ -747,7 +802,7 @@ async fn require_preview_access(st: PreviewState, req: Request, next: Next) -> R
 
     let ok = {
         let db = st.db.lock().unwrap();
-        session_cookie(&req)
+        request_session(&req)
             .map(|t| auth::is_valid_session(&db, &t))
             .unwrap_or(false)
     };
@@ -783,7 +838,7 @@ struct CloudHint {
 
 async fn session_info(State(st): State<ControlState>, req: Request) -> Json<SessionInfo> {
     let db = st.db.lock().unwrap();
-    let authenticated = session_cookie(&req)
+    let authenticated = request_session(&req)
         .map(|t| auth::is_valid_session(&db, &t))
         .unwrap_or(false);
     // Only advertise cloud sign-in once a machine has an owner; before that
@@ -816,7 +871,9 @@ async fn login(State(st): State<ControlState>, Json(body): Json<LoginBody>) -> R
                 header::SET_COOKIE,
                 format!("{SESSION_COOKIE}={token}; Path=/; Max-Age=31536000; SameSite=Lax"),
             )],
-            Json(serde_json::json!({ "ok": true })),
+            // The packaged app keeps this and sends it as a bearer token; the
+            // browser build ignores it and uses the cookie.
+            Json(serde_json::json!({ "ok": true, "token": token })),
         )
             .into_response(),
         Err(e) => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": e }))).into_response(),
@@ -1335,6 +1392,70 @@ mod tests {
 
         let list = get(gw.control_port, "/api/previews");
         assert!(list.contains("401"), "project list served anonymously: {list}");
+    }
+
+/// GET with an Authorization header, as the packaged app sends.
+    fn get_bearer(port: u16, path: &str, token: &str) -> String {
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        s.write_all(
+            format!("GET {path} HTTP/1.1{CRLF}Host: 127.0.0.1{CRLF}Authorization: Bearer {token}{CRLF}Connection: close{CRLF}{CRLF}").as_bytes(),
+        )
+        .unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out
+    }
+
+    #[test]
+    fn a_bearer_token_works_where_a_cookie_cannot() {
+        // The packaged app is cross-site, so its cookie would be dropped.
+        let (gw, db) = gateway_with_account();
+        gw.add_preview("secret:dev", spawn_upstream("x")).unwrap();
+        let token = auth::login(&db.lock().unwrap(), "upe", "correct-horse").unwrap();
+
+        let ok = get_bearer(gw.control_port, "/api/previews", &token);
+        assert!(ok.contains("secret:dev"), "bearer token rejected: {ok}");
+
+        let bad = get_bearer(gw.control_port, "/api/previews", "not-a-session");
+        assert!(bad.contains("401"), "any bearer token was accepted: {bad}");
+    }
+
+    #[test]
+    fn responses_carry_cross_origin_headers() {
+        let gw = test_gateway();
+        let body = get(gw.control_port, "/api/session");
+        assert!(
+            body.to_lowercase().contains("access-control-allow-origin: *"),
+            "no CORS header, a packaged app could not call this: {body}"
+        );
+    }
+
+    #[test]
+    fn a_preflight_is_answered_rather_than_405() {
+        let gw = test_gateway();
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, gw.control_port)).unwrap();
+        s.write_all(
+            format!("OPTIONS /api/previews HTTP/1.1{CRLF}Host: 127.0.0.1{CRLF}Origin: tauri://localhost{CRLF}Access-Control-Request-Method: GET{CRLF}Connection: close{CRLF}{CRLF}").as_bytes(),
+        )
+        .unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        assert!(!out.contains("405"), "preflight was rejected: {out}");
+        assert!(out.to_lowercase().contains("access-control-allow-headers"), "{out}");
+    }
+
+    #[test]
+    fn signing_in_returns_a_token_for_the_app_to_keep() {
+        let (gw, _db) = gateway_with_account();
+        let body = r#"{"username":"upe","password":"correct-horse"}"#;
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, gw.control_port)).unwrap();
+        s.write_all(
+            format!("POST /api/login HTTP/1.1{CRLF}Host: 127.0.0.1{CRLF}Content-Type: application/json{CRLF}Content-Length: {}{CRLF}Connection: close{CRLF}{CRLF}{}", body.len(), body).as_bytes(),
+        )
+        .unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        assert!(out.contains("\"token\""), "no token in the login response: {out}");
     }
 
     #[test]
