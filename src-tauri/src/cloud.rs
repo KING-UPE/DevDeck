@@ -421,18 +421,6 @@ mod tests {
         Db::open_in_memory().unwrap()
     }
 
-#[test]
-    #[ignore]
-    fn TEMP_live_signup_path() {
-        // Uses an address that already exists, so no account is created.
-        let d = db();
-        let cfg = config(&d).expect("no config");
-        println!("URL = {}", cfg.url);
-        println!("KEY len = {}", cfg.anon_key.len());
-        match sign_up(&cfg, "upendrauniversity@gmail.com", "placeholder-not-used") {
-            Ok(msg) => println!("OK  -> {msg}"),
-            Err(e) => println!("ERR -> {e}"),
-        }
     }
 
     #[test]
