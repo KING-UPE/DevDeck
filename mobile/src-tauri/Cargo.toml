@@ -1,0 +1,18 @@
+[package]
+name = "devdeck-remote"
+version = "1.0.0"
+description = "Control the DevDeck running on your computer, from your phone."
+edition = "2021"
+
+[lib]
+# Android loads the app as a shared library, so the crate must build as one.
+name = "devdeck_remote_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Deliberately bare. The phone talks to the PC and to the account service over
+# plain HTTP from the web layer, so there is nothing for Rust to do here.
+tauri = { version = "2", features = [] }

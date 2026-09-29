@@ -614,10 +614,12 @@ fn gateway_start(
         let stop_app = app.clone();
         let restart_app = app.clone();
         let start_app = app.clone();
+        let share_tunnels = state.tunnels.clone();
         gateway::Controls {
             stop: Arc::new(move |key: String| halt_process(&stop_app, &key)),
             restart: Arc::new(move |key: String| restart_process(&restart_app, &key)),
             start: Arc::new(move |key: String| begin_process(&start_app, &key)),
+            share: Arc::new(move |port: u16| share_tunnels.lock().unwrap().open(port)),
         }
     };
     let gw = gateway::Gateway::start(state.db.clone(), state.processes.clone(), controls)?;

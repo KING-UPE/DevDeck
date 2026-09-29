@@ -51,6 +51,8 @@ pub struct Controls {
     pub stop: Arc<dyn Fn(String) + Send + Sync>,
     pub restart: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
     pub start: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
+    /// Publish one preview port and return the public URL it is reachable at.
+    pub share: Arc<dyn Fn(u16) -> Result<String, String> + Send + Sync>,
 }
 
 /// A single project's preview server.
@@ -191,6 +193,7 @@ impl Gateway {
             .route("/api/process/restart", axum::routing::post(restart_process))
             .route("/api/process/start", axum::routing::post(start_process))
             .route("/api/projects", get(list_projects))
+            .route("/api/share", axum::routing::post(share_project))
             .layer(middleware::from_fn_with_state(state.clone(), require_session));
 
         let app = Router::new()
@@ -407,6 +410,41 @@ pub fn qr_svg(data: &str) -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------- handlers
+
+/// Give a project's preview its own public address.
+///
+/// A quick tunnel maps one local port to one hostname, so the control plane's
+/// tunnel cannot carry previews too. Path-prefixing them under it is not an
+/// option either: dev servers request their assets from absolute paths like
+/// `/assets/app.js`, which no `<base>` tag redirects. Each previewed project
+/// therefore gets its own tunnel, opened on demand rather than up front.
+async fn share_project(State(st): State<ControlState>, Query(q): Query<KeyQuery>) -> Response {
+    let Some(c) = st.controls.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not available").into_response();
+    };
+
+    let Some(port) = st.previews.lock().unwrap().get(&q.key).map(|p| p.port) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "That script is not running." })),
+        )
+            .into_response();
+    };
+
+    // Opening a tunnel blocks while the service assigns a hostname.
+    let result = tokio::task::spawn_blocking(move || (c.share)(port)).await;
+
+    match result {
+        Ok(Ok(url)) => Json(serde_json::json!({ "url": url })).into_response(),
+        Ok(Err(e)) => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 
 /// Allow a packaged app to call this gateway from its own origin.
 ///

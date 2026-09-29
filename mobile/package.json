@@ -1,0 +1,15 @@
+{
+  "name": "devdeck-remote",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Control the DevDeck running on your computer, from your phone.",
+  "scripts": {
+    "tauri": "tauri",
+    "android:init": "tauri android init",
+    "android:apk": "tauri android build --apk"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
