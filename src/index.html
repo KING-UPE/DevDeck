@@ -49,6 +49,9 @@
                 <button id="process-manager-btn" class="btn btn-secondary btn-full" title="Manage Node Processes" style="margin-top: 0.5rem; background: var(--surface-light); border-color: var(--border);">
                     <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"></path><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg></span> Process Manager
                 </button>
+                <button id="remote-btn" class="btn btn-secondary btn-full" title="Preview your projects on a phone" style="margin-top: 0.5rem; background: var(--surface-light); border-color: var(--border);">
+                    <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"></rect><line x1="12" y1="18" x2="12" y2="18"></line></svg></span> Mobile Remote
+                </button>
             </div>
             <div class="workspace-list" id="workspace-list">
                 <!-- Workspace paths go here -->
@@ -222,6 +225,48 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:0.5rem; vertical-align: middle;"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
                     Refresh List
                 </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Mobile Remote Modal -->
+    <div id="remote-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="width: 720px; max-width: 92vw;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                <h2>Mobile Remote</h2>
+                <button id="close-remote-modal" class="btn-icon" title="Close">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 1.25rem;">
+                Preview your running dev servers on a phone. Scan once on the same Wi-Fi and the projects appear automatically.
+            </p>
+
+            <div style="display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap;">
+                <div id="remote-qr" style="width: 220px; height: 220px; flex: none; background: #fff; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 0.8rem; text-align: center; padding: 0.5rem;">
+                    Turn on the gateway<br>to get a pairing code
+                </div>
+
+                <div style="flex: 1; min-width: 260px;">
+                    <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem;">
+                        <span id="remote-dot" style="width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); flex: none;"></span>
+                        <strong id="remote-state" style="font-size: 0.9rem;">Gateway off</strong>
+                    </div>
+
+                    <label class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">Address on this network</label>
+                    <div style="display: flex; gap: 0.4rem; margin: 0.35rem 0 1rem;">
+                        <input id="remote-url" readonly placeholder="Not running" style="flex: 1; font-family: ui-monospace, monospace; font-size: 0.82rem; padding: 0.5rem 0.6rem; background: var(--surface-light); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);" />
+                        <button id="remote-copy-btn" class="btn btn-secondary" style="padding: 0.4rem 0.7rem; font-size: 0.8rem;">Copy</button>
+                    </div>
+
+                    <label class="text-muted" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;">Live previews</label>
+                    <div id="remote-previews" class="text-muted" style="font-size: 0.82rem; margin: 0.35rem 0 1.25rem; max-height: 140px; overflow-y: auto;">
+                        No servers running yet.
+                    </div>
+
+                    <button id="remote-toggle-btn" class="btn btn-primary btn-full">Turn on gateway</button>
+                </div>
             </div>
         </div>
     </div>

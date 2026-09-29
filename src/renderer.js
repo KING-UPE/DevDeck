@@ -1445,3 +1445,108 @@ closeHiddenModalBtn.addEventListener('click', () => {
 // Filters
 projectSearch.addEventListener('input', renderProjects);
 projectTypeFilter.addEventListener('change', renderProjects);
+
+// === MOBILE REMOTE GATEWAY ===
+// Turns the PC into a gateway that re-serves running dev servers to phones on
+// the network. The backend does the proxying; this is just the control panel.
+(function initMobileRemote() {
+    const openBtn    = document.getElementById('remote-btn');
+    const modal      = document.getElementById('remote-modal');
+    const closeBtn   = document.getElementById('close-remote-modal');
+    const toggleBtn  = document.getElementById('remote-toggle-btn');
+    const copyBtn    = document.getElementById('remote-copy-btn');
+    const urlInput   = document.getElementById('remote-url');
+    const qrBox      = document.getElementById('remote-qr');
+    const stateLabel = document.getElementById('remote-state');
+    const dot        = document.getElementById('remote-dot');
+    const previews   = document.getElementById('remote-previews');
+
+    if (!openBtn || !modal) return;
+
+    let pollTimer = null;
+
+    async function refresh() {
+        let info;
+        try {
+            info = await invoke('gateway_status');
+        } catch (e) {
+            return;
+        }
+
+        const on = !!info.running;
+        dot.style.background = on ? 'var(--success, #22c55e)' : 'var(--text-muted)';
+        stateLabel.textContent = on ? 'Gateway running' : 'Gateway off';
+        toggleBtn.textContent = on ? 'Turn off gateway' : 'Turn on gateway';
+        toggleBtn.className = on ? 'btn btn-secondary btn-full' : 'btn btn-primary btn-full';
+        urlInput.value = info.lan_url || (on ? 'No network address found' : '');
+
+        if (on) {
+            try {
+                qrBox.innerHTML = await invoke('gateway_pair_qr');
+                const svg = qrBox.querySelector('svg');
+                if (svg) { svg.style.width = '100%'; svg.style.height = '100%'; }
+            } catch (e) {
+                qrBox.textContent = String(e);
+            }
+            await refreshPreviews(info);
+        } else {
+            qrBox.innerHTML = 'Turn on the gateway<br>to get a pairing code';
+            previews.textContent = 'No servers running yet.';
+        }
+    }
+
+    async function refreshPreviews(info) {
+        if (!info.lan_url) return;
+        try {
+            const res = await fetch(info.lan_url + '/api/previews');
+            const list = await res.json();
+            previews.innerHTML = list.length
+                ? list.map(p =>
+                    '<div style="padding:0.3rem 0;border-bottom:1px solid var(--border);">' +
+                    '<code style="font-size:0.78rem;">' + p.url + '</code>' +
+                    '<div style="font-size:0.72rem;opacity:0.7;">' + p.key + '</div></div>'
+                  ).join('')
+                : 'No servers running yet. Start one and it appears here.';
+        } catch (e) {
+            previews.textContent = 'Could not reach the gateway.';
+        }
+    }
+
+    function open() {
+        modal.style.display = 'flex';
+        refresh();
+        pollTimer = setInterval(refresh, 3000);
+    }
+    function close() {
+        modal.style.display = 'none';
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+
+    openBtn.addEventListener('click', open);
+    closeBtn.addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+    toggleBtn.addEventListener('click', async () => {
+        toggleBtn.disabled = true;
+        try {
+            const info = await invoke('gateway_status');
+            if (info.running) {
+                await invoke('gateway_stop');
+            } else {
+                await invoke('gateway_start');
+            }
+            await refresh();
+        } catch (e) {
+            customAlert('Gateway error: ' + e);
+        } finally {
+            toggleBtn.disabled = false;
+        }
+    });
+
+    copyBtn.addEventListener('click', () => {
+        if (!urlInput.value) return;
+        navigator.clipboard.writeText(urlInput.value);
+        copyBtn.textContent = 'Copied';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200);
+    });
+})();

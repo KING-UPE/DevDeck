@@ -236,6 +236,26 @@ impl Gateway {
     }
 }
 
+/// Render the pairing URL as an inline SVG QR code.
+///
+/// Returned as SVG rather than a PNG so the desktop UI can drop it straight
+/// into the DOM and have it stay crisp at any size.
+pub fn qr_svg(data: &str) -> Result<String, String> {
+    use qrcode::render::svg;
+    use qrcode::{EcLevel, QrCode};
+
+    let code = QrCode::with_error_correction_level(data.as_bytes(), EcLevel::M)
+        .map_err(|e| format!("could not encode pairing QR: {e}"))?;
+
+    Ok(code
+        .render::<svg::Color>()
+        .min_dimensions(220, 220)
+        .quiet_zone(true)
+        .dark_color(svg::Color("#050914"))
+        .light_color(svg::Color("#ffffff"))
+        .build())
+}
+
 // ---------------------------------------------------------------- handlers
 
 #[derive(serde::Deserialize)]

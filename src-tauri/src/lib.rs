@@ -615,6 +615,18 @@ fn gateway_stop(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// SVG QR encoding the pairing URL, for the desktop "Remote" panel.
+#[tauri::command]
+fn gateway_pair_qr(state: State<AppState>) -> Result<String, String> {
+    let guard = state.gateway.lock().unwrap();
+    let gw = guard.as_ref().ok_or("Gateway is not running")?;
+    let url = gw
+        .info()
+        .pair_url
+        .ok_or("No LAN address available - are you connected to a network?")?;
+    gateway::qr_svg(&url)
+}
+
 #[tauri::command]
 fn gateway_status(state: State<AppState>) -> gateway::GatewayInfo {
     match state.gateway.lock().unwrap().as_ref() {
@@ -1529,7 +1541,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
