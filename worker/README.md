@@ -58,8 +58,13 @@ Wrangler prints the deployed URL, e.g.
 
 ## Pointing DevDeck at your deployment
 
-Set `DEFAULT_SERVICE` in `src-tauri/src/rendezvous.rs` to that URL before
-building, so every install uses it out of the box. Individual installs can
+`DEFAULT_SERVICE` in `src-tauri/src/rendezvous.rs` is **empty on purpose**, so
+remote reconnect is off until someone configures it. A baked-in hostname would
+mean every install publishes where its tunnel is reachable to whoever happens
+to control that name.
+
+Set it to the URL you just deployed, which you own, so your builds use it out
+of the box. Individual installs can
 override it at runtime through the `rendezvous_set_service` command.
 
 ## Free tier

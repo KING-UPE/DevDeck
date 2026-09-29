@@ -16,9 +16,13 @@ use crate::db::Db;
 use serde::Serialize;
 use std::time::Duration;
 
-/// Where installations publish by default. Overridable per-install via the
-/// `rendezvous_url` setting, so a fork can point at its own deployment.
-pub const DEFAULT_SERVICE: &str = "https://devdeck-rendezvous.workers.dev";
+/// Deliberately empty: there is no default deployment.
+///
+/// A baked-in hostname would mean every install publishes where its tunnel is
+/// reachable to whoever happens to control that name. Until a maintainer sets
+/// this to a deployment they own - or a user sets `rendezvous_url` - the
+/// feature stays off and LAN pairing is unaffected.
+pub const DEFAULT_SERVICE: &str = "";
 
 const SETTING_URL: &str = "rendezvous_url";
 const SETTING_ID: &str = "rendezvous_id";
@@ -43,6 +47,7 @@ pub struct Identity {
 pub fn identity(db: &Db) -> Result<Identity, String> {
     let service = db
         .setting(SETTING_URL)
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_SERVICE.to_string());
 
     let id = match db.setting(SETTING_ID) {
@@ -70,9 +75,20 @@ fn token(db: &Db) -> Result<String, String> {
         .ok_or_else(|| "rendezvous identity is missing".to_string())
 }
 
+/// Is a rendezvous deployment configured for this install?
+pub fn is_configured(db: &Db) -> bool {
+    identity(db).map(|i| !i.service.is_empty()).unwrap_or(false)
+}
+
 /// Point this install's id at `tunnel_url`.
 pub fn publish(db: &Db, tunnel_url: &str) -> Result<Identity, String> {
     let ident = identity(db)?;
+    if ident.service.is_empty() {
+        return Err(
+            "No rendezvous service is configured, so the tunnel URL was not published."
+                .to_string(),
+        );
+    }
     let tok = token(db)?;
 
     let endpoint = format!("{}/r/{}", ident.service.trim_end_matches('/'), ident.id);
@@ -100,6 +116,9 @@ pub fn publish(db: &Db, tunnel_url: &str) -> Result<Identity, String> {
 /// Stop advertising this install.
 pub fn withdraw(db: &Db) -> Result<(), String> {
     let ident = identity(db)?;
+    if ident.service.is_empty() {
+        return Ok(());
+    }
     let tok = token(db)?;
     let endpoint = format!("{}/r/{}", ident.service.trim_end_matches('/'), ident.id);
 
@@ -136,13 +155,35 @@ mod tests {
         Db::open_in_memory().unwrap()
     }
 
+#[test]
+    fn there_is_no_default_deployment() {
+        // A baked-in hostname would publish every install's tunnel location to
+        // whoever controls that name.
+        let d = db();
+        assert!(!is_configured(&d));
+        assert!(identity(&d).unwrap().service.is_empty());
+    }
+
+    #[test]
+    fn publishing_is_refused_until_a_service_is_set() {
+        let d = db();
+        let err = publish(&d, "https://example.trycloudflare.com").unwrap_err();
+        assert!(err.contains("No rendezvous service"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn configuring_a_service_enables_it() {
+        let d = db();
+        set_service(&d, "https://mine.example.com").unwrap();
+        assert!(is_configured(&d));
+    }
+
     #[test]
     fn creates_an_identity_on_first_use() {
         let d = db();
         let a = identity(&d).unwrap();
         assert_eq!(a.id.len(), 64, "id should be a 32-byte capability");
         assert!(a.shortcut.ends_with(&a.id));
-        assert!(a.service.starts_with("https://"));
     }
 
     #[test]
