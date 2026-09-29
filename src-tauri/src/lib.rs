@@ -2,6 +2,7 @@ mod auth;
 mod db;
 mod gateway;
 mod tunnel;
+mod livereload;
 mod ports;
 mod rendezvous;
 

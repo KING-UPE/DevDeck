@@ -17,7 +17,9 @@
 
 use crate::auth::{self, Visibility};
 use crate::db::Db;
+use crate::livereload::{self, Reloader};
 use axum::{
+    body::Body,
     extract::{Query, Request, State},
     middleware::{self, Next},
     http::{header, StatusCode, Uri},
@@ -40,6 +42,8 @@ const SESSION_COOKIE: &str = "devdeck_session";
 /// A single project's preview server.
 struct Preview {
     port: u16,
+    /// Held so the file watcher lives exactly as long as the preview does.
+    _reloader: Option<Arc<Reloader>>,
     /// Dropping or firing this stops the listener.
     shutdown: Option<oneshot::Sender<()>>,
 }
@@ -225,11 +229,48 @@ impl Gateway {
             project_key: key.to_string(),
             db: self.db.clone(),
         };
+        // A project key is "<path>:<script>"; the script says whether the
+        // framework already hot-reloads, and the path is what to watch.
+        let (project_path, script_name) = match key.rfind(':') {
+            Some(i) if i > 2 => (&key[..i], &key[i + 1..]),
+            _ => (key, ""),
+        };
+
+        let reloader = if livereload::needs_injection(script_name) {
+            Reloader::watch(std::path::Path::new(project_path))
+        } else {
+            None
+        };
+
         let proxy: Router = ReverseProxy::new("/", &upstream).into();
+
+        let mut app = Router::new();
+        if let Some(r) = reloader.clone() {
+            // Registered before the proxy so the project cannot shadow it.
+            app = app.route(
+                livereload::RELOAD_PATH,
+                get(move || {
+                    let r = r.clone();
+                    async move {
+                        if livereload::wait_for_change(r.subscribe()).await {
+                            StatusCode::OK
+                        } else {
+                            StatusCode::NO_CONTENT
+                        }
+                    }
+                }),
+            );
+        }
+        let mut app = app.merge(proxy);
+
+        if reloader.is_some() {
+            app = app.layer(middleware::from_fn(inject_livereload));
+        }
+
         // Capture the per-project state in a closure rather than using
         // `from_fn_with_state`: the proxy router's state parameter is `()`, and
         // the `State<_>` extractor cannot infer its tuple through that.
-        let app = proxy.layer(middleware::from_fn(move |req: Request, next: Next| {
+        let app = app.layer(middleware::from_fn(move |req: Request, next: Next| {
             let st = pstate.clone();
             async move { require_preview_access(st, req, next).await }
         }));
@@ -262,6 +303,7 @@ impl Gateway {
             key.to_string(),
             Preview {
                 port,
+                _reloader: reloader,
                 shutdown: Some(tx),
             },
         );
@@ -308,6 +350,40 @@ pub fn qr_svg(data: &str) -> Result<String, String> {
 }
 
 // ---------------------------------------------------------------- handlers
+
+/// Append the live-reload client to HTML the project serves.
+///
+/// Only touches `text/html`, and skips anything compressed: rewriting an
+/// encoded body would corrupt it, and these dev servers do not compress by
+/// default anyway.
+async fn inject_livereload(req: Request, next: Next) -> Response {
+    let res = next.run(req).await;
+    let (mut parts, body) = res.into_parts();
+
+    let is_html = parts
+        .headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.starts_with("text/html"))
+        .unwrap_or(false);
+    let encoded = parts.headers.contains_key(header::CONTENT_ENCODING);
+
+    if !is_html || encoded {
+        return Response::from_parts(parts, body);
+    }
+
+    // 8 MiB is far beyond any hand-written page; past that, pass it through
+    // untouched rather than buffering without limit.
+    let Ok(bytes) = axum::body::to_bytes(body, 8 * 1024 * 1024).await else {
+        return Response::from_parts(parts, Body::empty());
+    };
+
+    let injected = livereload::inject(&String::from_utf8_lossy(&bytes));
+    // The body grew, so the upstream's length no longer describes it.
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(injected))
+}
+
 
 /// Read the session cookie out of a request.
 fn session_cookie(req: &Request) -> Option<String> {
@@ -559,6 +635,27 @@ mod tests {
         out
     }
 
+    /// Upstream that answers with an HTML document.
+    fn spawn_html_upstream() -> u16 {
+        let l = StdListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in l.incoming().take(8) {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = [0u8; 1024];
+                let _ = s.read(&mut buf);
+                let body = "<html><body><h1>static site</h1></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = s.write_all(resp.as_bytes());
+            }
+        });
+        port
+    }
+
     fn test_gateway() -> Gateway {
         // Loopback + port 0 keeps the test off the wildcard address, which would
         // otherwise raise a Windows Firewall prompt on every run.
@@ -727,6 +824,49 @@ mod tests {
         let port = gw.add_preview("proj:dev", spawn_upstream("hello")).unwrap();
         assert!(get(port, "/").contains("200 OK"));
         assert!(get(gw.control_port, "/api/previews").contains("proj:dev"));
+    }
+
+#[test]
+    fn a_static_project_gets_the_live_reload_client() {
+        let gw = test_gateway();
+        let dir = std::env::temp_dir();
+        let key = format!("{}:live server", dir.display());
+        let port = gw.add_preview(&key, spawn_html_upstream()).unwrap();
+
+        let resp = get(port, "/");
+        assert!(resp.contains("200 OK"), "not served: {resp}");
+        assert!(resp.contains("static site"), "original content lost");
+        assert!(
+            resp.contains(crate::livereload::RELOAD_PATH),
+            "live-reload client was not injected: {resp}"
+        );
+    }
+
+    #[test]
+    fn a_framework_project_is_left_alone() {
+        // Vite ships its own HMR; injecting would cause double reloads.
+        let gw = test_gateway();
+        let key = format!("{}:dev", std::env::temp_dir().display());
+        let port = gw.add_preview(&key, spawn_html_upstream()).unwrap();
+
+        let resp = get(port, "/");
+        assert!(resp.contains("static site"));
+        assert!(
+            !resp.contains(crate::livereload::RELOAD_PATH),
+            "injected into a project that hot-reloads itself"
+        );
+    }
+
+    #[test]
+    fn injection_does_not_touch_non_html_responses() {
+        let gw = test_gateway();
+        let key = format!("{}:live server", std::env::temp_dir().display());
+        // spawn_upstream serves text/plain.
+        let port = gw.add_preview(&key, spawn_upstream("body { color: red }")).unwrap();
+
+        let resp = get(port, "/site.css");
+        assert!(resp.contains("body { color: red }"));
+        assert!(!resp.contains(crate::livereload::RELOAD_PATH), "injected into CSS");
     }
 
     #[test]
