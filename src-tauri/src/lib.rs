@@ -1,3 +1,6 @@
+mod gateway;
+mod ports;
+
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 use std::fs;
@@ -45,6 +48,11 @@ struct NodeProcess {
 
 struct AppState {
     active_processes: Arc<Mutex<HashMap<String, std::process::Child>>>,
+    /// Port each running dev server was seen binding to, keyed by process key.
+    /// Populated by scraping process output; see [`ports::detect_port`].
+    detected_ports: Arc<Mutex<HashMap<String, u16>>>,
+    /// The mobile gateway, once started. `None` until the user turns it on.
+    gateway: Arc<Mutex<Option<gateway::Gateway>>>,
 }
 
 fn update_tray_menu(app: &tauri::AppHandle) {
@@ -451,14 +459,17 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
     let stderr = child.stderr.take().unwrap();
     
     state.active_processes.lock().unwrap().insert(process_key.clone(), child);
+    let detected_ports = state.detected_ports.clone();
     let _ = app.emit("process-started", serde_json::json!({ "processKey": process_key }));
     
     let pk1 = process_key.clone();
     let app1 = app.clone();
+    let ports1 = detected_ports.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(l) = line {
+                note_detected_port(&app1, &ports1, &pk1, &l);
                 let _ = app1.emit("process-output", serde_json::json!({ "processKey": pk1, "type": "stdout", "data": format!("{}\n", l) }));
             }
         }
@@ -466,10 +477,12 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
 
     let pk2 = process_key.clone();
     let app2 = app.clone();
+    let ports2 = detected_ports.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(l) = line {
+                note_detected_port(&app2, &ports2, &pk2, &l);
                 let _ = app2.emit("process-output", serde_json::json!({ "processKey": pk2, "type": "stderr", "data": format!("{}\n", l) }));
             }
         }
@@ -478,6 +491,7 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
     let pk3 = process_key.clone();
     let app3 = app.clone();
     let active_procs = state.active_processes.clone();
+    let ports3 = detected_ports.clone();
     thread::spawn(move || {
         loop {
             thread::sleep(std::time::Duration::from_millis(500));
@@ -491,6 +505,8 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
             }
             if !is_running {
                 active_procs.lock().unwrap().remove(&pk3);
+                ports3.lock().unwrap().remove(&pk3);
+                unpublish_preview(&app3, &pk3);
                 let _ = app3.emit("process-closed", serde_json::json!({ "processKey": pk3, "code": 0 }));
                 update_tray_menu(&app3);
                 break;
@@ -500,6 +516,123 @@ fn run_custom_command(app: AppHandle, state: State<AppState>, project_path: Stri
 
     update_tray_menu(&app);
     Ok(())
+}
+
+/// Record a port scraped from process output and tell the frontend about it.
+///
+/// Re-announcing is suppressed: dev servers reprint their banner on every
+/// rebuild, and the gateway only cares when the port actually changes.
+fn note_detected_port(
+    app: &AppHandle,
+    ports: &Arc<Mutex<HashMap<String, u16>>>,
+    process_key: &str,
+    line: &str,
+) {
+    // Registering the preview needs the app state, which is reachable from the
+    // handle; see `publish_preview` below.
+    let Some(port) = ports::detect_port(line) else { return };
+
+    {
+        let mut map = ports.lock().unwrap();
+        if map.get(process_key) == Some(&port) {
+            return;
+        }
+        map.insert(process_key.to_string(), port);
+    }
+
+    let preview_port = publish_preview(app, process_key, port);
+
+    let _ = app.emit(
+        "process-port-detected",
+        serde_json::json!({
+            "processKey": process_key,
+            "port": port,
+            "previewPort": preview_port,
+        }),
+    );
+}
+
+/// Expose a freshly detected dev server through the gateway, if it is running.
+///
+/// Returns the public port the project is reachable on, or `None` when the
+/// gateway is off — in which case the project is simply local-only.
+fn publish_preview(app: &AppHandle, process_key: &str, upstream_port: u16) -> Option<u16> {
+    let state = app.state::<AppState>();
+    let guard = state.gateway.lock().unwrap();
+    let gw = guard.as_ref()?;
+    match gw.add_preview(process_key, upstream_port) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("[devdeck] could not publish preview for {process_key}: {e}");
+            None
+        }
+    }
+}
+
+/// Withdraw a project's preview once its process is gone.
+fn unpublish_preview(app: &AppHandle, process_key: &str) {
+    let state = app.state::<AppState>();
+    // Bind the guard: `if let` would otherwise drop the temporary while `gw`
+    // still borrows from it.
+    let guard = state.gateway.lock().unwrap();
+    if let Some(gw) = guard.as_ref() {
+        gw.remove_preview(process_key);
+    }
+}
+
+#[tauri::command]
+fn gateway_start(state: State<AppState>) -> Result<gateway::GatewayInfo, String> {
+    let mut guard = state.gateway.lock().unwrap();
+    if let Some(gw) = guard.as_ref() {
+        return Ok(gw.info());
+    }
+    let gw = gateway::Gateway::start()?;
+    let info = gw.info();
+    *guard = Some(gw);
+    drop(guard);
+
+    // Adopt any dev servers that were already running before the gateway came up.
+    let known: Vec<(String, u16)> = state
+        .detected_ports
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), *v))
+        .collect();
+    if let Some(gw) = state.gateway.lock().unwrap().as_ref() {
+        for (key, port) in known {
+            let _ = gw.add_preview(&key, port);
+        }
+    }
+    Ok(info)
+}
+
+#[tauri::command]
+fn gateway_stop(state: State<AppState>) -> Result<(), String> {
+    if let Some(mut gw) = state.gateway.lock().unwrap().take() {
+        gw.shutdown();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn gateway_status(state: State<AppState>) -> gateway::GatewayInfo {
+    match state.gateway.lock().unwrap().as_ref() {
+        Some(gw) => gw.info(),
+        None => gateway::GatewayInfo {
+            running: false,
+            lan_url: None,
+            pair_url: None,
+            control_port: gateway::CONTROL_PORT,
+            token: String::new(),
+        },
+    }
+}
+
+/// Ports of every currently running dev server, keyed by process key.
+#[tauri::command]
+fn get_detected_ports(state: State<AppState>) -> HashMap<String, u16> {
+    state.detected_ports.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -525,14 +658,17 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
     let stderr = child.stderr.take().unwrap();
     
     state.active_processes.lock().unwrap().insert(process_key.clone(), child);
+    let detected_ports = state.detected_ports.clone();
     let _ = app.emit("process-started", serde_json::json!({ "processKey": process_key }));
     
     let pk1 = process_key.clone();
     let app1 = app.clone();
+    let ports1 = detected_ports.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(l) = line {
+                note_detected_port(&app1, &ports1, &pk1, &l);
                 let _ = app1.emit("process-output", serde_json::json!({ "processKey": pk1, "type": "stdout", "data": format!("{}\n", l) }));
             }
         }
@@ -540,10 +676,12 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
 
     let pk2 = process_key.clone();
     let app2 = app.clone();
+    let ports2 = detected_ports.clone();
     thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(l) = line {
+                note_detected_port(&app2, &ports2, &pk2, &l);
                 let _ = app2.emit("process-output", serde_json::json!({ "processKey": pk2, "type": "stderr", "data": format!("{}\n", l) }));
             }
         }
@@ -552,6 +690,7 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
     let pk3 = process_key.clone();
     let app3 = app.clone();
     let active_procs = state.active_processes.clone();
+    let ports3 = detected_ports.clone();
     thread::spawn(move || {
         loop {
             thread::sleep(std::time::Duration::from_millis(500));
@@ -565,6 +704,8 @@ fn run_script(app: AppHandle, state: State<AppState>, project_path: String, scri
             }
             if !is_running {
                 active_procs.lock().unwrap().remove(&pk3);
+                ports3.lock().unwrap().remove(&pk3);
+                unpublish_preview(&app3, &pk3);
                 let _ = app3.emit("process-closed", serde_json::json!({ "processKey": pk3, "code": 0 }));
                 update_tray_menu(&app3);
                 break;
@@ -1316,7 +1457,11 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState { active_processes: Arc::new(Mutex::new(HashMap::new())) })
+        .manage(AppState {
+            active_processes: Arc::new(Mutex::new(HashMap::new())),
+            detected_ports: Arc::new(Mutex::new(HashMap::new())),
+            gateway: Arc::new(Mutex::new(None)),
+        })
         .setup(|app| {
             let _tray = tauri::tray::TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -1384,7 +1529,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

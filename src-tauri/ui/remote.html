@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#050914" />
+<title>DevDeck Remote</title>
+<style>
+  :root {
+    --bg: #050914;
+    --surface: #0a1122;
+    --surface-2: #151e32;
+    --border: rgba(60, 130, 246, 0.18);
+    --border-hi: rgba(60, 130, 246, 0.45);
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --accent: #3b82f6;
+    --ok: #22c55e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    overscroll-behavior-y: contain;
+  }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: inherit;
+  }
+  .card:active { border-color: var(--border-hi); background: var(--surface-2); }
+  .card .name { font-weight: 600; font-size: 0.95rem; }
+  .card .meta { color: var(--dim); font-size: 0.8rem; margin-top: 2px; }
+  .card .chev { margin-left: auto; color: var(--dim); }
+  .empty { color: var(--muted); text-align: center; padding: 56px 20px; }
+  .empty p { margin: 8px 0 0; font-size: 0.875rem; color: var(--dim); }
+  .skel { height: 66px; border-radius: 14px; margin-bottom: 10px;
+          background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%);
+          background-size: 400% 100%; animation: sh 1.2s ease-in-out infinite; }
+  @keyframes sh { 0% { background-position: 100% 50% } 100% { background-position: 0 50% } }
+</style>
+</head>
+<body>
+  <header>
+    <span class="dot" aria-hidden="true"></span>
+    <h1>DevDeck Remote</h1>
+  </header>
+
+  <main id="list">
+    <div class="skel"></div>
+    <div class="skel"></div>
+  </main>
+
+<script>
+  const list = document.getElementById('list');
+
+  function render(items) {
+    if (!items.length) {
+      list.innerHTML =
+        '<div class="empty"><strong>No servers running</strong>' +
+        '<p>Start a project on your PC and it will show up here.</p></div>';
+      return;
+    }
+    list.innerHTML = items.map(function (p) {
+      var name = p.key.split(':').pop() || p.key;
+      var path = p.key.split(':').slice(0, -1).join(':');
+      return '<a class="card" href="' + p.url + '">' +
+             '<div><div class="name">' + name + '</div>' +
+             '<div class="meta">' + (path || '') + ' &middot; :' + p.port + '</div></div>' +
+             '<span class="chev">&rsaquo;</span></a>';
+    }).join('');
+  }
+
+  async function load() {
+    try {
+      const r = await fetch('/api/previews');
+      render(await r.json());
+    } catch (e) {
+      list.innerHTML = '<div class="empty"><strong>Disconnected</strong>' +
+                       '<p>Lost contact with DevDeck on your PC.</p></div>';
+    }
+  }
+
+  load();
+  setInterval(load, 3000);
+</script>
+</body>
+</html>
