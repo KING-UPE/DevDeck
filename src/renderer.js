@@ -1752,6 +1752,20 @@ projectTypeFilter.addEventListener('change', renderProjects);
     $('cloud-login-btn').addEventListener('click', function () { cloudAuth('cloud_sign_in', this, 'Signing in…'); });
     $('cloud-signup-btn').addEventListener('click', function () { cloudAuth('cloud_sign_up', this, 'Creating…'); });
 
+    $('cloud-reset-btn').addEventListener('click', async function () {
+        const email = $('cloud-email').value.trim();
+        const msg = $('cloud-msg');
+        if (!email) { msg.textContent = 'Enter your email first, then press this.'; return; }
+        this.disabled = true;
+        try {
+            msg.textContent = await invoke('cloud_reset_password', { email: email });
+        } catch (e) {
+            msg.textContent = String(e);
+        } finally {
+            this.disabled = false;
+        }
+    });
+
     $('cloud-signout-btn').addEventListener('click', async () => {
         await invoke('cloud_sign_out');
         await refresh();

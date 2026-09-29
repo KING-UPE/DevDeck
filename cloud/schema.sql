@@ -11,8 +11,6 @@
 -- WHAT DELIBERATELY DOES NOT
 --
 --   Workspaces, project paths, custom names and logs stay on the user's own
---   machine. They are absolute paths that mean nothing elsewhere, and they leak
---   client names, employers and unreleased work. The cloud's only job is
 --   answering "where is this account's PC right now".
 
 create table if not exists public.devices (

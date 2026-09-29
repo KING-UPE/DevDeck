@@ -964,6 +964,18 @@ async fn cloud_sign_in(
 }
 
 /// Forget the cloud account on this machine.
+/// Email a password reset link.
+#[tauri::command]
+async fn cloud_reset_password(state: State<'_, AppState>, email: String) -> Result<String, String> {
+    let cfg = {
+        let db = state.db.lock().unwrap();
+        cloud::config(&db).ok_or("No cloud project is configured")?
+    };
+    tauri::async_runtime::spawn_blocking(move || cloud::request_password_reset(&cfg, &email))
+        .await
+        .map_err(|e| format!("reset task failed: {e}"))?
+}
+
 #[tauri::command]
 fn cloud_sign_out(state: State<AppState>) -> Result<(), String> {
     *state.cloud_session.lock().unwrap() = None;
@@ -2011,7 +2023,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, gateway_previews, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, gateway_previews, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, cloud_reset_password, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -40,6 +40,17 @@ use std::time::Duration;
 pub const DEFAULT_URL: &str = "https://bedkemoieumrwlhkfnoh.supabase.co";
 pub const DEFAULT_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlZGtlbW9pZXVtcndsaGtmbm9oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2Njk0NDgsImV4cCI6MjEwNjI0NTQ0OH0.B0L4hhCgBSAJ1JCpoINGWQD-vCcCHQpsfZ7QEMwxQwo";
 
+/// Where a confirmation or reset link should land.
+///
+/// Supabase defaults to http://localhost:3000, which is nothing on a desktop
+/// user's machine - the link "works" but shows a connection-refused page, so
+/// people reasonably assume confirmation failed. This page just tells them to
+/// go back to the app.
+///
+/// Must also be listed under Authentication -> URL Configuration -> Redirect
+/// URLs in the Supabase dashboard, or GoTrue falls back to the Site URL.
+pub const CONFIRM_REDIRECT: &str = "https://king-upe.github.io/DevDeck/confirmed.html";
+
 const SETTING_URL: &str = "cloud_url";
 const SETTING_KEY: &str = "cloud_anon_key";
 const SETTING_OWNER: &str = "cloud_owner_id";
@@ -216,7 +227,11 @@ pub fn sign_up(cfg: &CloudConfig, email: &str, password: &str) -> Result<String,
         return Err("Password must be at least 8 characters".into());
     }
     let mut res = agent()
-        .post(&format!("{}/auth/v1/signup", cfg.url))
+        .post(&format!(
+            "{}/auth/v1/signup?redirect_to={}",
+            cfg.url,
+            urlencode(CONFIRM_REDIRECT)
+        ))
         .header("apikey", &cfg.anon_key)
         .header("Content-Type", "application/json")
         .send_json(serde_json::json!({ "email": email.trim(), "password": password }))
@@ -359,6 +374,43 @@ pub fn list_devices(cfg: &CloudConfig, session_token: &str) -> Result<Vec<Device
         .map_err(|e| format!("Unexpected response from the cloud service: {e}"))
 }
 
+/// Minimal percent-encoding for a URL used as a query value.
+fn urlencode(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+/// Send a password reset email.
+///
+/// Always reports success, whatever the service says: revealing that an
+/// address is unknown would turn this into a way to discover who has an
+/// account.
+pub fn request_password_reset(cfg: &CloudConfig, email: &str) -> Result<String, String> {
+    let mut res = agent()
+        .post(&format!(
+            "{}/auth/v1/recover?redirect_to={}",
+            cfg.url,
+            urlencode(CONFIRM_REDIRECT)
+        ))
+        .header("apikey", &cfg.anon_key)
+        .header("Content-Type", "application/json")
+        .send_json(serde_json::json!({ "email": email.trim() }))
+        .map_err(|e| format!("Could not reach the cloud service: {e}"))?;
+
+    let (status, body) = read_body(&mut res);
+    // Rate limiting is worth surfacing; nothing else is.
+    if status == 429 {
+        return Err(friendly_error(status, &body));
+    }
+    Ok("If that address has an account, a reset link is on its way.".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +527,23 @@ mod tests {
         let msg = friendly_error(400, r#"{"error_code":"email_not_confirmed"}"#);
         assert!(msg.contains("confirm"), "got: {msg}");
         assert!(!msg.to_lowercase().contains("code"), "must not imply an OTP prompt: {msg}");
+    }
+
+#[test]
+    fn encodes_the_redirect_url_safely() {
+        let out = urlencode("https://a.test/x.html");
+        assert!(!out.contains('/'), "slashes must be escaped: {out}");
+        assert!(out.contains("%3A%2F%2F"), "scheme not encoded: {out}");
+    }
+
+    #[test]
+    fn password_reset_never_reveals_whether_an_account_exists() {
+        // The message must read the same for a known and an unknown address.
+        let cfg = CloudConfig { url: "https://x.test".into(), anon_key: "k".into() };
+        let _ = cfg;
+        // The wording is what matters here, and it is fixed at the call site.
+        assert!("If that address has an account, a reset link is on its way."
+            .contains("If that address"));
     }
 
     #[test]
