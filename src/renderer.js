@@ -775,6 +775,11 @@ listen('process-started', (event) => {
     const { processKey } = event.payload;
     if (runningProcesses.has(processKey)) return;
     runningProcesses.add(processKey);
+    // Tabs are built from the keys of processLogs, and this fires before the
+    // process has printed anything. Without an empty buffer to find, the tab
+    // for something started on the phone never appears and its output lands
+    // nowhere visible.
+    processLogs[processKey] = processLogs[processKey] || [];
     if (activeProject) renderScripts();
     renderTerminalTabs();
 });
@@ -1368,8 +1373,14 @@ function renderTerminalBody() {
 }
 
 function appendLog(processKey, text, isError = false) {
+    // A key we have never seen means a tab that does not exist yet - output
+    // from elsewhere, or from before this panel was open.
+    const isNew = !processLogs[processKey];
     processLogs[processKey] = processLogs[processKey] || [];
     processLogs[processKey].push({ text, isError });
+    if (isNew && activeProject && processKey.startsWith(activeProject.path + ':')) {
+        renderTerminalTabs();
+    }
     if (activeTerminalTab === processKey) {
         const span = document.createElement('span');
         span.className = `log-line ${isError ? 'log-err' : ''}`;

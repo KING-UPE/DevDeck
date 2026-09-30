@@ -31,7 +31,21 @@ let device = null;       // { name, base } - the computer being controlled
 let deviceToken = null;  // session that computer issued us
 let projects = [];
 
-function at(screen) { document.body.dataset.at = screen; }
+/* Anything can change the computer's state - a script started at the desk, one
+   that exited on its own - and the phone would otherwise keep showing whatever
+   was true when it last looked. Polling only while the project list is on
+   screen, so a backgrounded app is not talking to the network for nothing. */
+let projectPoll = null;
+function at(screen) {
+  document.body.dataset.at = screen;
+  clearInterval(projectPoll);
+  projectPoll = null;
+  if (screen === 'projects') {
+    projectPoll = setInterval(() => {
+      if (document.visibilityState === 'visible') loadProjects().catch(() => {});
+    }, 4000);
+  }
+}
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -216,6 +230,9 @@ async function openDevice(d) {
   $('dev-name').textContent = d.name;
   $('dev-sub').textContent = 'connecting…';
   $('projects').innerHTML = '<div class="skel"></div><div class="skel"></div>';
+  // The list was just thrown away, so the next load must draw even if the
+  // data is byte-for-byte what it was last time.
+  projectsShape = '';
   at('projects');
 
   try {
@@ -234,9 +251,20 @@ async function openDevice(d) {
   }
 }
 
+let projectsShape = '';
+
 async function loadProjects() {
   projects = (await box('/api/projects')) || [];
   $('dev-sub').textContent = projects.length + (projects.length === 1 ? ' project' : ' projects');
+
+  // Rebuilding the list throws away whatever is half-typed in a command box,
+  // so on a poll that found nothing new, leave the DOM alone.
+  const shape = JSON.stringify(projects.map((r) => [
+    r.path, r.name, r.workspace_name,
+    r.scripts.map((s) => s.name + (s.running ? '1' : '0') + (s.port || '')),
+  ]));
+  if (shape === projectsShape) return;
+  projectsShape = shape;
   renderProjects();
 }
 
