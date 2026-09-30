@@ -96,10 +96,15 @@ jobs:
           java-version: 17
       - uses: android-actions/setup-android@v3
 
+      # The toolchain directory goes on PATH so the `cc` crate can find the
+      # cross-compiler by name; without it a dependency with a build script
+      # fails to configure for this target.
       - name: Install NDK
         run: |
           sdkmanager --install "ndk;27.2.12479018"
-          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+          NDK="$ANDROID_SDK_ROOT/ndk/27.2.12479018"
+          echo "NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
       - uses: dtolnay/rust-toolchain@stable
         with:

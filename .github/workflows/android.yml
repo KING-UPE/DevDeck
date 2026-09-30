@@ -125,8 +125,23 @@ jobs:
           path: ${{ steps.collect.outputs.apk }}
 
       # Only attach to a release when this run came from a tag.
+      #
+      # The desktop workflow is what creates the release, and it runs in
+      # parallel with this one. Whichever finishes first must not fail, so wait
+      # for the release to exist rather than assuming it already does.
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.collect.outputs.apk }}" --clobber
+        run: |
+          for i in $(seq 1 60); do
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" "${{ steps.collect.outputs.apk }}" --clobber
+              exit 0
+            fi
+            echo "Release $GITHUB_REF_NAME does not exist yet; waiting ($i/60)."
+            sleep 30
+          done
+          echo "The release never appeared, so the APK could not be attached." >&2
+          echo "It is still downloadable from this run's build artifacts." >&2
+          exit 1
