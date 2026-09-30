@@ -36,8 +36,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # `packages: ''` is required. The action's default is to install `tools`,
+      # which Google has removed from the SDK repository, so the default makes
+      # sdkmanager exit non-zero and the job dies before it builds anything.
+      # The packages this build actually needs are installed in the next step.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - name: Install NDK
         run: |

@@ -94,7 +94,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # See android.yml: the action's default `packages` no longer exists.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       # The toolchain directory goes on PATH so the `cc` crate can find the
       # cross-compiler by name; without it a dependency with a build script
