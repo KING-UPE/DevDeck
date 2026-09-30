@@ -40,6 +40,14 @@ use tokio::sync::oneshot;
 pub const CONTROL_PORT: u16 = 7420;
 const PREVIEW_PORT_BASE: u16 = 7421;
 const SESSION_COOKIE: &str = "devdeck_session";
+/// Query parameter carrying a preview key, and the cookie it is promoted to.
+///
+/// The query parameter only arrives on the first request. Everything the
+/// page then asks for - stylesheets, scripts, images - is a fresh request
+/// without it, so the key is stored as a cookie on that host or the page
+/// loads as unstyled wreckage.
+const PREVIEW_KEY_PARAM: &str = "dd_key";
+const PREVIEW_COOKIE: &str = "devdeck_preview";
 
 /// How the gateway asks the app to stop or restart a process.
 ///
@@ -53,6 +61,19 @@ pub struct Controls {
     pub start: Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>,
     /// Publish one preview port and return the public URL it is reachable at.
     pub share: Arc<dyn Fn(u16) -> Result<String, String> + Send + Sync>,
+    /// The process keys that are alive right now.
+    ///
+    /// A detected port is not evidence of life and its absence is not evidence
+    /// of death. A dev server that has not finished booting has no port yet,
+    /// and a script that never serves anything - a build, a test run, a
+    /// watcher - never gets one at all. Deciding from ports alone made a
+    /// freshly started script render its Start button again, and left
+    /// non-server scripts impossible to stop from the phone.
+    pub running: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
+    /// Write a line to a running process's stdin.
+    pub input: Arc<dyn Fn(String, String) -> Result<(), String> + Send + Sync>,
+    /// Run an arbitrary command in a project directory.
+    pub custom: Arc<dyn Fn(String, String) -> Result<(), String> + Send + Sync>,
 }
 
 /// A single project's preview server.
@@ -63,6 +84,14 @@ struct Preview {
     /// Dropping or firing this stops the listener.
     shutdown: Option<oneshot::Sender<()>>,
 }
+
+/// Tokens that grant read access to one project's preview, by project path.
+///
+/// A share link has to work in a plain browser tab with no DevDeck session,
+/// and the owner's own session token must never be the thing in that URL: a
+/// copied link would hand over their whole machine. These are scoped to a
+/// single project and to viewing it.
+type PreviewKeys = Arc<Mutex<HashMap<String, String>>>;
 
 /// Everything the running gateway owns.
 pub struct Gateway {
@@ -75,6 +104,7 @@ pub struct Gateway {
     bind: IpAddr,
     runtime: Arc<tokio::runtime::Runtime>,
     previews: Arc<Mutex<HashMap<String, Preview>>>,
+    preview_keys: PreviewKeys,
     db: Arc<Mutex<Db>>,
     control_shutdown: Option<oneshot::Sender<()>>,
     control_port: u16,
@@ -87,6 +117,7 @@ struct ControlState {
     /// Absent in tests, where there is no app to drive.
     controls: Option<Controls>,
     previews: Arc<Mutex<HashMap<String, Preview>>>,
+    preview_keys: PreviewKeys,
     lan_ip: Option<IpAddr>,
     db: Arc<Mutex<Db>>,
 }
@@ -95,6 +126,7 @@ struct ControlState {
 #[derive(Clone)]
 struct PreviewState {
     project_key: String,
+    preview_keys: PreviewKeys,
     db: Arc<Mutex<Db>>,
 }
 
@@ -171,6 +203,7 @@ impl Gateway {
 
         let token = random_token();
         let previews: Arc<Mutex<HashMap<String, Preview>>> = Arc::new(Mutex::new(HashMap::new()));
+        let preview_keys: PreviewKeys = Arc::new(Mutex::new(HashMap::new()));
         let ip = lan_ip();
 
         let state = ControlState {
@@ -178,6 +211,7 @@ impl Gateway {
             processes: processes.clone(),
             controls,
             previews: previews.clone(),
+            preview_keys: preview_keys.clone(),
             lan_ip: ip,
             db: db.clone(),
         };
@@ -192,6 +226,8 @@ impl Gateway {
             .route("/api/process/stop", axum::routing::post(stop_process))
             .route("/api/process/restart", axum::routing::post(restart_process))
             .route("/api/process/start", axum::routing::post(start_process))
+            .route("/api/process/input", axum::routing::post(process_input))
+            .route("/api/process/custom", axum::routing::post(custom_command))
             .route("/api/projects", get(list_projects))
             .route("/api/share", axum::routing::post(share_project))
             .layer(middleware::from_fn_with_state(state.clone(), require_session));
@@ -239,6 +275,7 @@ impl Gateway {
             lan_ip: ip,
             runtime,
             previews,
+            preview_keys,
             control_shutdown: Some(tx),
             control_port,
         })
@@ -269,6 +306,7 @@ impl Gateway {
         // tunnel URL - could read the dev server directly.
         let pstate = PreviewState {
             project_key: key.to_string(),
+            preview_keys: self.preview_keys.clone(),
             db: self.db.clone(),
         };
         // A project key is "<path>:<script>"; the script says whether the
@@ -435,7 +473,29 @@ async fn share_project(State(st): State<ControlState>, Query(q): Query<KeyQuery>
     let result = tokio::task::spawn_blocking(move || (c.share)(port)).await;
 
     match result {
-        Ok(Ok(url)) => Json(serde_json::json!({ "url": url })).into_response(),
+        Ok(Ok(url)) => {
+            // A private project's link has to carry its own permission, or the
+            // owner taps Preview and gets 401 from their own machine. Minting
+            // a key scoped to this one project avoids the two bad answers:
+            // silently making the project public, or putting the session token
+            // in a URL people copy around.
+            let url = {
+                let path = auth::project_path_of(&q.key).to_string();
+                let is_public = {
+                    let db = st.db.lock().unwrap();
+                    auth::visibility_of(&db, &q.key) == Visibility::Public
+                };
+                if is_public {
+                    url
+                } else {
+                    let key = auth::random_token();
+                    st.preview_keys.lock().unwrap().insert(key.clone(), path);
+                    let sep = if url.contains('?') { '&' } else { '?' };
+                    format!("{url}{sep}{PREVIEW_KEY_PARAM}={key}")
+                }
+            };
+            Json(serde_json::json!({ "url": url })).into_response()
+        }
         Ok(Err(e)) => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": e }))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -500,6 +560,39 @@ struct ProjectRow {
     scripts: Vec<ProjectScript>,
     /// True when any of its scripts is running.
     running: bool,
+    /// The workspace folder this project sits in, and a short name for it.
+    ///
+    /// Projects are not stored with a workspace id: a workspace is just a
+    /// folder that was scanned, so membership is the longest workspace path
+    /// that prefixes the project's own. Computing it here keeps the phone from
+    /// having to know anything about paths.
+    workspace: Option<String>,
+    workspace_name: Option<String>,
+}
+
+/// The longest workspace path that contains this project.
+///
+/// Longest wins so a workspace nested inside another claims its own projects
+/// rather than the outer one swallowing everything.
+fn workspace_for<'a>(path: &str, workspaces: &'a [String]) -> Option<&'a String> {
+    let needle = path.replace('\\', "/").to_lowercase();
+    workspaces
+        .iter()
+        .filter(|w| {
+            let w = w.replace('\\', "/").to_lowercase();
+            let w = w.trim_end_matches('/').to_string();
+            needle == w || needle.starts_with(&format!("{w}/"))
+        })
+        .max_by_key(|w| w.len())
+}
+
+/// The last path segment, which is what people call a folder.
+fn folder_name(path: &str) -> String {
+    path.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path)
+        .to_string()
 }
 
 /// Every project the desktop has scanned, whether running or not.
@@ -521,7 +614,16 @@ async fn list_projects(State(st): State<ControlState>) -> Json<Vec<ProjectRow>> 
         .map(|(k, p)| (k.clone(), p.port))
         .collect();
 
+    // Liveness comes from the process table, not from whether a port has been
+    // seen. See `Controls::running`.
+    let alive: std::collections::HashSet<String> = st
+        .controls
+        .as_ref()
+        .map(|c| (c.running)().into_iter().collect())
+        .unwrap_or_default();
+
     let db = st.db.lock().unwrap();
+    let workspaces = db.workspaces().unwrap_or_default();
     let mut rows: Vec<ProjectRow> = db
         .projects()
         .unwrap_or_default()
@@ -537,21 +639,40 @@ async fn list_projects(State(st): State<ControlState>) -> Json<Vec<ProjectRow>> 
                     ProjectScript {
                         name: name.clone(),
                         url: port.map(|n| format!("http://{host}:{n}")),
-                        running: port.is_some(),
+                        running: alive.contains(&key),
                         port,
                     }
                 })
                 .collect();
-            scripts.sort_by(|a, b| a.name.cmp(&b.name));
 
-            let display = p.custom_name.clone().unwrap_or_else(|| {
-                p.path
-                    .trim_end_matches(['/', '\\'])
-                    .rsplit(['/', '\\'])
-                    .next()
-                    .unwrap_or(&p.path)
-                    .to_string()
-            });
+            // A command typed from a phone or the desk is running but is not
+            // one of the project's declared scripts, so it would otherwise
+            // vanish from the list the moment the page refreshed.
+            let prefix = format!("{}:", p.path);
+            let mut extra: Vec<ProjectScript> = alive
+                .iter()
+                .filter(|k| k.starts_with(&prefix))
+                .filter(|k| !scripts.iter().any(|s| format!("{prefix}{}", s.name) == **k))
+                .map(|k| {
+                    let name = k[prefix.len()..].to_string();
+                    let port = live.get(k).copied();
+                    ProjectScript {
+                        name,
+                        url: port.map(|n| format!("http://{host}:{n}")),
+                        running: true,
+                        port,
+                    }
+                })
+                .collect();
+            extra.sort_by(|a, b| a.name.cmp(&b.name));
+            scripts.sort_by(|a, b| a.name.cmp(&b.name));
+            scripts.extend(extra);
+
+            let display = p
+                .custom_name
+                .clone()
+                .unwrap_or_else(|| folder_name(&p.path));
+            let ws = workspace_for(&p.path, &workspaces).cloned();
 
             ProjectRow {
                 running: scripts.iter().any(|s| s.running),
@@ -560,6 +681,8 @@ async fn list_projects(State(st): State<ControlState>) -> Json<Vec<ProjectRow>> 
                 kind: p.project_type,
                 visibility: p.visibility,
                 scripts,
+                workspace_name: ws.as_deref().map(folder_name),
+                workspace: ws,
             }
         })
         .collect();
@@ -587,6 +710,63 @@ async fn start_process(State(st): State<ControlState>, Query(q): Query<KeyQuery>
     }
 }
 
+
+/// Turn a control callback's result into a response.
+///
+/// The three control endpoints below differ only in which callback they call,
+/// and repeating the match three times is how the shapes drift apart.
+fn control_result(result: Result<Result<(), String>, tokio::task::JoinError>) -> Response {
+    match result {
+        Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(Err(e)) => {
+            (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e }))).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct InputBody {
+    key: String,
+    text: String,
+}
+
+/// Type a line into a running process.
+///
+/// Dev tooling asks questions - overwrite this file, pick a port, press a key
+/// to reload - and a phone that cannot answer them leaves the process stuck
+/// with no way out but killing it.
+async fn process_input(State(st): State<ControlState>, Json(b): Json<InputBody>) -> Response {
+    let Some(c) = st.controls.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not available").into_response();
+    };
+    control_result(tokio::task::spawn_blocking(move || (c.input)(b.key, b.text)).await)
+}
+
+#[derive(serde::Deserialize)]
+struct CustomBody {
+    path: String,
+    command: String,
+}
+
+/// Run a one-off command in a project directory.
+async fn custom_command(State(st): State<ControlState>, Json(b): Json<CustomBody>) -> Response {
+    let Some(c) = st.controls.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not available").into_response();
+    };
+    if b.command.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "No command given." })),
+        )
+            .into_response();
+    }
+    control_result(tokio::task::spawn_blocking(move || (c.custom)(b.path, b.command)).await)
+}
 
 #[derive(serde::Deserialize)]
 struct CloudLoginBody {
@@ -846,14 +1026,58 @@ async fn require_preview_access(st: PreviewState, req: Request, next: Next) -> R
     };
 
     if ok {
-        next.run(req).await
-    } else {
-        (
+        return next.run(req).await;
+    }
+
+    // A share link carries its own permission. The key is checked against this
+    // project specifically, so a link to one project opens nothing else.
+    let offered = query_param(&req, PREVIEW_KEY_PARAM).or_else(|| cookie(&req, PREVIEW_COOKIE));
+    let wanted = auth::project_path_of(&st.project_key).to_string();
+    let key_ok = offered
+        .as_ref()
+        .and_then(|k| st.preview_keys.lock().unwrap().get(k).cloned())
+        .map(|path| path == wanted)
+        .unwrap_or(false);
+
+    if !key_ok {
+        return (
             StatusCode::UNAUTHORIZED,
             "This project is private. Sign in to DevDeck to view it.",
         )
-            .into_response()
+            .into_response();
     }
+
+    // Promote the key to a cookie so the page's own requests carry it. It is
+    // third-party inside the app's preview frame, which rules out Lax.
+    let from_query = query_param(&req, PREVIEW_KEY_PARAM).is_some();
+    let mut res = next.run(req).await;
+    if from_query {
+        if let Some(k) = offered {
+            if let Ok(v) = header::HeaderValue::from_str(&format!(
+                "{PREVIEW_COOKIE}={k}; Path=/; Max-Age=86400; SameSite=None; Secure"
+            )) {
+                res.headers_mut().append(header::SET_COOKIE, v);
+            }
+        }
+    }
+    res
+}
+
+/// One query-string value, without pulling in a parser.
+fn query_param(req: &Request, name: &str) -> Option<String> {
+    req.uri().query()?.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == name).then(|| v.to_string())
+    })
+}
+
+/// One cookie value by name.
+fn cookie(req: &Request, name: &str) -> Option<String> {
+    let raw = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    raw.split(';')
+        .filter_map(|c| c.trim().split_once('='))
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| v.to_string())
 }
 
 #[derive(Serialize)]
@@ -1210,6 +1434,91 @@ mod tests {
         let resp = get(port, "/");
         assert!(resp.contains("401"), "private project was served: {resp}");
         assert!(!resp.contains("top secret"), "private body leaked: {resp}");
+    }
+
+    /// Tapping Preview must actually show the project. The alternatives were
+    /// both bad: silently publishing it, or putting the owner's session token
+    /// in a URL they are invited to copy and send to people.
+    #[test]
+    fn a_preview_key_opens_the_project_it_was_minted_for() {
+        let (gw, _db) = gateway_with_account();
+        let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
+
+        let key = auth::random_token();
+        gw.preview_keys
+            .lock()
+            .unwrap()
+            .insert(key.clone(), "secret".into());
+
+        let resp = get(port, &format!("/?{PREVIEW_KEY_PARAM}={key}"));
+        assert!(resp.contains("200 OK"), "share link refused: {resp}");
+        assert!(resp.contains("top secret"), "body missing: {resp}");
+
+        // The page's own requests arrive without the query string, so the key
+        // has to come back as a cookie or the preview loads unstyled.
+        assert!(
+            resp.contains(PREVIEW_COOKIE) && resp.contains("SameSite=None"),
+            "no usable cookie was set: {resp}"
+        );
+    }
+
+    /// A key is a key to one door.
+    #[test]
+    fn a_preview_key_does_not_open_a_different_project() {
+        let (gw, _db) = gateway_with_account();
+        let other = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
+
+        let key = auth::random_token();
+        gw.preview_keys
+            .lock()
+            .unwrap()
+            .insert(key.clone(), "some-other-project".into());
+
+        let resp = get(other, &format!("/?{PREVIEW_KEY_PARAM}={key}"));
+        assert!(resp.contains("401"), "key crossed projects: {resp}");
+        assert!(!resp.contains("top secret"), "body leaked: {resp}");
+    }
+
+    #[test]
+    fn an_invented_preview_key_opens_nothing() {
+        let (gw, _db) = gateway_with_account();
+        let port = gw.add_preview("secret:dev", spawn_upstream("top secret")).unwrap();
+
+        let resp = get(port, &format!("/?{PREVIEW_KEY_PARAM}=not-a-real-key"));
+        assert!(resp.contains("401"), "guessed key was accepted: {resp}");
+    }
+
+    /// Nested workspaces: the inner one owns its projects, or adding a
+    /// workspace inside another silently moves every project under the outer.
+    #[test]
+    fn a_project_belongs_to_the_closest_workspace() {
+        let spaces = vec![
+            "D:/code".to_string(),
+            "D:/code/clients".to_string(),
+            "D:/unrelated".to_string(),
+        ];
+        assert_eq!(
+            workspace_for("D:/code/clients/acme", &spaces),
+            Some(&"D:/code/clients".to_string())
+        );
+        assert_eq!(
+            workspace_for("D:/code/sideproject", &spaces),
+            Some(&"D:/code".to_string())
+        );
+        assert_eq!(workspace_for("E:/elsewhere/thing", &spaces), None);
+    }
+
+    /// Windows hands back backslashes and mixed case; neither should decide
+    /// whether a project has a workspace.
+    #[test]
+    fn workspace_matching_survives_windows_paths() {
+        let spaces = vec!["D:\\Code\\Clients".to_string()];
+        assert_eq!(
+            workspace_for("d:/code/clients/acme", &spaces),
+            Some(&"D:\\Code\\Clients".to_string())
+        );
+        // A sibling that merely starts with the same letters is not inside it.
+        assert_eq!(workspace_for("D:\\Code\\ClientsOld\\x", &spaces), None);
     }
 
     #[test]

@@ -133,7 +133,7 @@ pub fn revoke_all_sessions(db: &Db) -> Result<(), String> {
 ///
 /// The index guard skips a Windows drive letter's colon, so `"D:\proj"` with
 /// no script is left whole.
-fn project_path_of(key: &str) -> &str {
+pub fn project_path_of(key: &str) -> &str {
     match key.rfind(':') {
         Some(i) if i > 2 => &key[..i],
         _ => key,

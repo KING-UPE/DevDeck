@@ -768,6 +768,17 @@ listen('process-output', (event) => {
     appendLog(processKey, data, type === 'stderr');
 });
 
+// A script can be started from the phone as well as from here, and the backend
+// is the only thing that sees both. Without this the desk shows a Start button
+// for something that is already running, and no way to stop it.
+listen('process-started', (event) => {
+    const { processKey } = event.payload;
+    if (runningProcesses.has(processKey)) return;
+    runningProcesses.add(processKey);
+    if (activeProject) renderScripts();
+    renderTerminalTabs();
+});
+
 listen('process-closed', (event) => {
     const { processKey, code } = event.payload;
     runningProcesses.delete(processKey);

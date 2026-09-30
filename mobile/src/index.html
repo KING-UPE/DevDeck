@@ -198,6 +198,39 @@
   }
   .actions .danger { color: var(--bad); border-color: rgba(248,113,113,.3); }
   #frame { flex: 1; width: 100%; border: 0; background: #fff; }
+
+  /* one line of input plus a send button, on the same row */
+  .sendrow {
+    flex: none; display: flex; gap: 8px; align-items: center;
+    padding: 10px 12px 0; background: var(--bg);
+  }
+  .sendrow .field { margin: 0; flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .82rem; }
+  .sendrow .send { flex: none; }
+  .sendrow[hidden] { display: none; }
+
+  /* workspace grouping */
+  .ws-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 16px 4px 6px; color: var(--dim);
+    font: 600 .72rem/1 inherit; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .ws-head .count {
+    margin-left: auto; text-transform: none; letter-spacing: 0;
+    font-weight: 500; font-size: .74rem;
+  }
+  .ws-head svg { width: 13px; height: 13px; flex: none; }
+
+  /* run a one-off command */
+  .cmdrow { display: flex; gap: 8px; padding: 8px 10px 10px; }
+  .cmdrow .field {
+    margin: 0; flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: .78rem; padding: 9px 11px;
+  }
+  .cmdrow button {
+    flex: none; padding: 0 14px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text); font: 600 .78rem/1 inherit; cursor: pointer;
+  }
 </style>
 </head>
 <body data-at="auth">
@@ -284,6 +317,14 @@
     </button>
   </div>
   <pre id="log-out"><span class="empty">Waiting for output...</span></pre>
+  <!-- Dev tooling asks questions, and a phone that cannot answer them leaves
+       the process stuck with nothing to do but kill it. -->
+  <form class="sendrow" id="stdin-form" autocomplete="off">
+    <input class="field" id="stdin-text" placeholder="Type a reply and send" />
+    <button class="iconbtn send" id="stdin-send" type="submit" aria-label="Send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+    </button>
+  </form>
   <div class="actions">
     <button id="log-restart">Restart</button>
     <button id="log-stop" class="danger">Stop</button>

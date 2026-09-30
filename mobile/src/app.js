@@ -251,14 +251,47 @@ function renderProjects() {
     return;
   }
 
-  el.innerHTML = projects.map((r) => {
+  el.innerHTML = groupByWorkspace(projects).map((group) => {
+    const head = group.name
+      ? '<div class="ws-head">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>' +
+          '<span>' + esc(group.name) + '</span>' +
+          '<span class="count">' + group.rows.length + '</span>' +
+        '</div>'
+      : '';
+    return head + group.rows.map(projectCard).join('');
+  }).join('');
+}
+
+/* Projects are not stored with a workspace id - the computer works out which
+   folder each one sits in and says so, which keeps path handling off the
+   phone entirely. */
+function groupByWorkspace(rows) {
+  const order = [];
+  const byWs = {};
+  rows.forEach((r) => {
+    const id = r.workspace || '';
+    if (!byWs[id]) { byWs[id] = { name: r.workspace_name || '', rows: [] }; order.push(id); }
+    byWs[id].rows.push(r);
+  });
+  // One workspace is not a grouping, it is a heading with nothing to compare
+  // against, so leave it off and show a plain list.
+  if (order.length < 2) return [{ name: '', rows: rows }];
+  return order.map((id) => byWs[id]);
+}
+
+function projectCard(r) {
     const scripts = r.scripts.map((sc) => {
       const key = r.path + ':' + sc.name;
       if (sc.running) {
         return '<div class="script">' +
           '<span class="dot on"></span>' +
           '<span class="script-name">' + esc(sc.name) + '</span>' +
-          '<button class="mini go" data-act="open" data-port="' + sc.port + '" data-name="' + esc(r.name) + '">Preview</button>' +
+          // No port yet means it is still booting, or it is not a server at
+          // all. Either way it is running and must be stoppable.
+          (sc.port
+            ? '<button class="mini go" data-act="open" data-port="' + sc.port + '" data-name="' + esc(r.name) + '">Preview</button>'
+            : '') +
           '<button class="mini icon" data-act="logs" data-key="' + esc(key) + '" aria-label="Logs">' +
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>' +
           '</button>' +
@@ -282,9 +315,13 @@ function renderProjects() {
         '</span>' +
         '<span class="caret"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>' +
       '</button>' +
-      '<div class="proj-body">' + scripts + '</div>' +
+      '<div class="proj-body">' + scripts +
+        '<div class="cmdrow">' +
+          '<input class="field" data-cmd-for="' + esc(r.path) + '" placeholder="Run a command, e.g. npm install" />' +
+          '<button class="mini" data-act="run" data-path="' + esc(r.path) + '">Run</button>' +
+        '</div>' +
+      '</div>' +
     '</div>';
-  }).join('');
 }
 
 $('projects').addEventListener('click', async (e) => {
@@ -301,13 +338,39 @@ $('projects').addEventListener('click', async (e) => {
   if (act === 'open') { openPreview(btn.dataset.port, btn.dataset.name); return; }
   if (act === 'logs') { openLogs(btn.dataset.key); return; }
 
+  if (act === 'run') {
+    const field = document.querySelector('[data-cmd-for="' + cssEscape(btn.dataset.path) + '"]');
+    const command = field && field.value.trim();
+    if (!command) { field && field.focus(); return; }
+    const was = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Running…';
+    try {
+      await box('/api/process/custom', {
+        method: 'POST',
+        body: JSON.stringify({ path: btn.dataset.path, command: command }),
+      });
+      field.value = '';
+      /* Watch it straight away: a one-off command is usually worth reading. */
+      openLogs(btn.dataset.path + ':$ ' + command);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      btn.disabled = false; btn.textContent = was;
+    }
+    return;
+  }
+
   const original = btn.textContent;
   btn.disabled = true;
   if (act === 'start') btn.textContent = 'Starting…';
   try {
     await box('/api/process/' + act + '?key=' + encodeURIComponent(btn.dataset.key), { method: 'POST' });
-    /* A dev server needs a moment to bind before its preview exists. */
-    setTimeout(loadProjects, act === 'start' ? 1600 : 500);
+    /* Twice on purpose. The first refresh flips the row to running, which is
+       true the moment the process exists; the second picks up the port once
+       the server has bound, which is what the Preview button needs. Waiting
+       only for the second was what made a started script show Start again. */
+    await loadProjects();
+    if (act === 'start') setTimeout(loadProjects, 2500);
   } catch (err) {
     alert(err.message);
   } finally {
@@ -315,6 +378,18 @@ $('projects').addEventListener('click', async (e) => {
     btn.textContent = original;
   }
 });
+
+/* Whether a process key is alive, according to the last list we were given. */
+function isRunning(key) {
+  return projects.some((r) =>
+    r.scripts.some((sc) => sc.running && r.path + ':' + sc.name === key)
+  );
+}
+
+/* Paths contain backslashes and colons, which are not valid in a selector. */
+function cssEscape(v) {
+  return String(v).replace(/["\\]/g, '\\$&');
+}
 
 /* ------------------------------------------------------------------ preview */
 
@@ -395,7 +470,9 @@ function appendLines(lines) {
     if (l.stream === 'stderr') span.className = 'e';
     span.textContent = l.text + '\n';
     frag.appendChild(span);
-    logSeq = l.seq;
+    // Locally echoed lines carry no sequence number. Letting one through would
+    // rewind the cursor and re-fetch the whole log on the next poll.
+    if (typeof l.seq === 'number' && l.seq >= 0) logSeq = l.seq;
   });
   el.appendChild(frag);
   while (el.childNodes.length > 600) el.removeChild(el.firstChild);
@@ -421,6 +498,9 @@ async function openLogs(key) {
   $('log-out').innerHTML = '<span class="empty">Waiting for output...</span>';
   $('log-name').textContent = key.slice(key.lastIndexOf(':') + 1) || 'Logs';
   $('log-sub').textContent = 'connecting';
+  // Nothing to type into a process that has stopped, and offering the box
+  // would only earn an error.
+  $('stdin-form').hidden = !isRunning(key);
   at('logs');
   try { appendLines((await box('/api/logs?key=' + encodeURIComponent(key))) || []); } catch (e) {}
   pumpLogs();
@@ -439,6 +519,9 @@ async function control(action, btn, busy) {
       logSeq = null;
       $('log-out').innerHTML = '<span class="empty">Restarting...</span>';
     }
+    // Stopping ends the conversation; restarting begins a new one.
+    $('stdin-form').hidden = action === 'stop';
+    loadProjects();
   } catch (e) {
     $('log-sub').textContent = e.message;
   } finally {
@@ -447,6 +530,31 @@ async function control(action, btn, busy) {
 }
 $('log-restart').addEventListener('click', function () { control('restart', this, 'Restarting…'); });
 $('log-stop').addEventListener('click', function () { control('stop', this, 'Stopping…'); });
+
+/* Answer a prompt the process is waiting on. */
+$('stdin-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const field = $('stdin-text');
+  const text = field.value;
+  if (!logKey || !text.trim()) return;
+  const send = $('stdin-send');
+  send.disabled = true;
+  try {
+    await box('/api/process/input', {
+      method: 'POST',
+      body: JSON.stringify({ key: logKey, text: text }),
+    });
+    // Echo it, because the process may print nothing back and a line that
+    // vanishes with no trace looks like it was never sent.
+    appendLines([{ stream: 'stdin', text: '> ' + text }]);
+    field.value = '';
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    send.disabled = false;
+    field.focus();
+  }
+});
 
 /* ------------------------------------------------------------------- sign in */
 

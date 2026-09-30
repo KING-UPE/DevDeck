@@ -615,11 +615,32 @@ fn gateway_start(
         let restart_app = app.clone();
         let start_app = app.clone();
         let share_tunnels = state.tunnels.clone();
+        let running_app = app.clone();
+        let input_app = app.clone();
+        let custom_app = app.clone();
         gateway::Controls {
             stop: Arc::new(move |key: String| halt_process(&stop_app, &key)),
             restart: Arc::new(move |key: String| restart_process(&restart_app, &key)),
             start: Arc::new(move |key: String| begin_process(&start_app, &key)),
             share: Arc::new(move |port: u16| share_tunnels.lock().unwrap().open(port)),
+            running: Arc::new(move || {
+                running_app
+                    .state::<AppState>()
+                    .active_processes
+                    .lock()
+                    .unwrap()
+                    .keys()
+                    .cloned()
+                    .collect()
+            }),
+            input: Arc::new(move |key: String, text: String| {
+                write_to_stdin(input_app.state::<AppState>(), key, text)
+            }),
+            custom: Arc::new(move |path: String, command: String| {
+                let app = custom_app.clone();
+                let state = app.state::<AppState>();
+                run_custom_command(app.clone(), state, path, command)
+            }),
         }
     };
     let gw = gateway::Gateway::start(state.db.clone(), state.processes.clone(), controls)?;

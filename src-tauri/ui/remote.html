@@ -411,7 +411,11 @@
           return '<div class="script">' +
             '<span class="running-dot"></span>' +
             '<span class="script-name">' + esc(sc.name) + '</span>' +
-            '<button class="mini go" data-act="open" data-url="' + esc(sc.url) + '" data-name="' + esc(r.name) + '">Preview</button>' +
+            // Running without a port yet: still booting, or never serves
+            // anything. Either way there is nothing to preview.
+            (sc.url
+              ? '<button class="mini go" data-act="open" data-url="' + esc(sc.url) + '" data-name="' + esc(r.name) + '">Preview</button>'
+              : '') +
             '<button class="mini icon" data-act="logs" data-key="' + esc(key) + '" aria-label="Logs">' +
               '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>' +
             '</button>' +
