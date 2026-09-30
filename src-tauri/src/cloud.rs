@@ -186,7 +186,21 @@ pub fn friendly_error(status: u16, body: &str) -> String {
         (422, _) if msg.to_lowercase().contains("password") => {
             "That password is too weak. Use at least 8 characters.".into()
         }
-        (429, _) => "Too many attempts. Wait a minute and try again.".into(),
+        // The server's own message is the only thing that says which limit was
+        // hit and for how long, and the two are nothing alike: sign-in attempts
+        // clear in minutes, while the built-in mail service allows a couple of
+        // messages an hour. Telling someone to wait a minute for the second one
+        // walks them straight back into the same wall.
+        (429, "over_email_send_rate_limit") => {
+            if msg.is_empty() {
+                "Too many emails requested. The mail service allows only a couple an hour."
+                    .into()
+            } else {
+                format!("Too many emails requested. {msg}")
+            }
+        }
+        (429, _) if !msg.is_empty() => format!("Too many attempts. {msg}"),
+        (429, _) => "Too many attempts. Wait a few minutes and try again.".into(),
         _ if !msg.is_empty() => msg.to_string(),
         _ => format!("The cloud service returned an error ({status})."),
     }
@@ -574,6 +588,27 @@ mod tests {
             "Incorrect email or password."
         );
         assert!(friendly_error(429, "{}").contains("Too many attempts"));
+
+        // A bare 429 says nothing useful, but these two do, and they mean very
+        // different waits. Dropping the server's wording is what sent someone
+        // retrying a password reset against an hourly limit.
+        let email_limit = friendly_error(
+            429,
+            r#"{"code":429,"error_code":"over_email_send_rate_limit","msg":"For security purposes, you can only request this after 47 seconds."}"#,
+        );
+        assert!(email_limit.contains("47 seconds"), "lost the wait: {email_limit}");
+        assert!(email_limit.contains("emails"), "did not say it was email: {email_limit}");
+
+        let request_limit = friendly_error(
+            429,
+            r#"{"code":429,"error_code":"over_request_rate_limit","msg":"Request rate limit reached"}"#,
+        );
+        assert!(request_limit.contains("Request rate limit reached"), "{request_limit}");
+
+        // No message to pass on: still say something, and do not promise a
+        // minute when the wait may be far longer.
+        let bare = friendly_error(429, r#"{"error_code":"over_email_send_rate_limit"}"#);
+        assert!(bare.contains("an hour"), "{bare}");
         assert!(friendly_error(422, r#"{"msg":"User already registered"}"#).contains("Sign in instead"));
         assert!(friendly_error(400, r#"{"error_code":"email_not_confirmed"}"#).contains("confirm your email"));
     }

@@ -69,7 +69,13 @@ function friendly(status, code, body) {
   if (code === 'invalid_credentials' || code === 'invalid_grant') return 'Incorrect email or password.';
   if (code === 'email_not_confirmed') return 'Check your inbox and confirm your email first.';
   if (code === 'bad_jwt' || status === 401) return 'Your sign-in expired. Sign in again.';
-  if (status === 429) return 'Too many attempts. Wait a minute.';
+  // Keep the server's wording: it is the only thing that says how long the
+  // wait is, and an email limit lasts an hour where a sign-in limit lasts
+  // minutes.
+  if (code === 'over_email_send_rate_limit') {
+    return 'Too many emails requested. ' + (msg || 'The mail service allows only a couple an hour.');
+  }
+  if (status === 429) return msg ? 'Too many attempts. ' + msg : 'Too many attempts. Wait a few minutes.';
   if (/already registered/i.test(msg)) return 'That email already has an account. Sign in instead.';
   return msg || ('Something went wrong (' + status + ').');
 }
