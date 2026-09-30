@@ -1581,11 +1581,24 @@ mod tests {
 #[test]
     fn a_static_project_gets_the_live_reload_client() {
         let gw = test_gateway();
-        let dir = std::env::temp_dir();
+        // A directory of our own, not the shared temp root. Watching that
+        // recursively means watching every file every other process has left
+        // there, which on a CI runner is enough to exhaust the kernel's
+        // inotify limit - the watch then fails, nothing is injected, and the
+        // failure looks like a bug in the injector.
+        let dir = std::env::temp_dir().join(format!(
+            "devdeck-livereload-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
         let key = format!("{}:live server", dir.display());
         let port = gw.add_preview(&key, spawn_html_upstream()).unwrap();
 
         let resp = get(port, "/");
+        let _ = std::fs::remove_dir_all(&dir);
         assert!(resp.contains("200 OK"), "not served: {resp}");
         assert!(resp.contains("static site"), "original content lost");
         assert!(
