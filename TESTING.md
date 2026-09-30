@@ -164,6 +164,22 @@ unsigned; both are normal outside the Play Store.
 4. Tap it → projects load → **Start** one → **Preview**
 5. **Copy link**, and open it in the phone's browser
 
+New in v1.1.1, and worth testing specifically:
+
+- Projects sit under **workspace headings** when there is more than one
+  workspace. One workspace shows no heading, which is deliberate.
+- **Start** should flip straight to a running row with Stop. It used to show
+  Start again a second later, and then refuse the second tap.
+- A script with **no web server** — a build or a watcher — should still show as
+  running and still be stoppable. It will have no Preview button, because there
+  is nothing to preview.
+- **Preview should just open**, with no visibility setting to change first.
+- The **send box under the log** answers a process that is waiting on input.
+- **Run a command** on a project card runs it there and opens its output, and
+  it stays in the list like any other running script.
+- Anything started from the phone should now appear at the desk, with a Stop
+  button rather than a Start one.
+
 If the PC shows **Offline**, step 4 was not done, or the tunnel dropped.
 
 **This is a remote control, not DevDeck.** It cannot open an editor, scan for

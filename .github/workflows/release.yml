@@ -38,30 +38,19 @@ jobs:
       - name: install frontend dependencies
         run: npm install
 
-      # `continue-on-error` covers the release upload, not the build. As of
-      # v1.1.0 this repository's Actions token is refused by the create-release
-      # API even though the job is granted `contents: write`, which fails the
-      # step after the installers have been built perfectly well. Losing a
-      # finished build to that is worse than carrying on, and a build that
-      # genuinely fails still turns the job red through the step below, which
-      # then finds no files.
+      # An empty tagName means "build, touch no release". Publishing is the
+      # separate job below, because this action's create-release call is
+      # refused by this repository's Actions token even when the job is granted
+      # `contents: write` - which threw away three finished builds at v1.1.0.
+      # Nothing here needs release permission, so a red job now means a genuinely
+      # broken build.
       - name: build tauri app
-        continue-on-error: true
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Empty on a manual run, which makes the action build without
-          # touching any release. Only a tag push should publish one.
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: "DevDeck ${{ github.ref_name }}"
-          releaseBody: "See the assets to download this version and install."
-          releaseDraft: false
-          prerelease: false
+          tagName: ''
 
-      # Publishing the installers as build artifacts needs no release
-      # permission, so they survive the failure above and can be attached to
-      # the release by hand.
       - name: Upload the installers as build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -74,3 +63,43 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/rpm/*.rpm
+
+  # Collect what the three platforms built and publish it in one place.
+  #
+  # Doing this with the `gh` CLI rather than inside the build also answers a
+  # question left open at v1.1.0: whether the refusal was the token's or the
+  # action's. If this succeeds, it was the action.
+  publish:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Collect every platform's installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mapfile -t FILES < <(find dist -type f)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "No installers were produced." >&2
+            exit 1
+          fi
+          printf '%s\n' "${FILES[@]}"
+
+          # The Android workflow runs in parallel and waits for this release to
+          # exist, so create it rather than assuming either order.
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "DevDeck $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+          gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber

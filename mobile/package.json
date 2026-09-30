@@ -1,7 +1,7 @@
 {
   "name": "devdeck-remote",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.1",
   "type": "module",
   "description": "Control the DevDeck running on your computer, from your phone.",
   "scripts": {
