@@ -1647,11 +1647,29 @@ projectTypeFilter.addEventListener('change', renderProjects);
         try {
             if (authMode === 'signup') {
                 const msg = await invoke('cloud_sign_up', { email: email, password: pass });
-                // Stay on this screen and switch to sign-in, rather than parking
-                // the user on a "waiting for confirmation" dead end.
-                setAuthMode('signin');
-                $('au-pass').value = pass;
-                say(msg, 'good');
+                // Whether a confirmation email is required is a setting on the
+                // service, not something this app knows, so ask rather than
+                // assume: if the new account can already sign in, finish the
+                // job instead of finding the same password a second time. If it
+                // cannot, this fails with email_not_confirmed and the signup
+                // message is exactly what needs saying.
+                let signedIn = false;
+                try {
+                    await invoke('cloud_sign_in', { email: email, password: pass });
+                    signedIn = true;
+                } catch (_) { /* confirmation is required; fall through */ }
+
+                if (signedIn) {
+                    $('au-pass').value = '';
+                    $('au-pass2').value = '';
+                    await openAccount();
+                } else {
+                    // Switch to sign-in rather than parking the user on a
+                    // "waiting for confirmation" dead end.
+                    setAuthMode('signin');
+                    $('au-pass').value = pass;
+                    say(msg, 'good');
+                }
             } else {
                 await invoke('cloud_sign_in', { email: email, password: pass });
                 $('au-pass').value = '';
