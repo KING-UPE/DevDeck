@@ -1040,9 +1040,12 @@ async fn require_preview_access(st: PreviewState, req: Request, next: Next) -> R
         .unwrap_or(false);
 
     if !key_ok {
+        // A line of plain text reads as a broken site. Whoever lands here has
+        // done nothing wrong and needs to know which of two situations they
+        // are in, so this is a page rather than a status line.
         return (
             StatusCode::UNAUTHORIZED,
-            "This project is private. Sign in to DevDeck to view it.",
+            Html(include_str!("../ui/private.html")),
         )
             .into_response();
     }

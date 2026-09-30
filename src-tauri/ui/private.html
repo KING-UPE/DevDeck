@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Private project &mdash; DevDeck</title>
+<style>
+  :root {
+    --bg: #050914;
+    --surface: #0a1122;
+    --surface-2: #151e32;
+    --border: rgba(60, 130, 246, 0.16);
+    --border-hi: rgba(60, 130, 246, 0.45);
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --accent: #3b82f6;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A quiet wash of colour so the page does not read as a browser error. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -40% 0 auto;
+    height: 70%;
+    background: radial-gradient(60% 60% at 50% 0%, rgba(59, 130, 246, 0.13), transparent 70%);
+    pointer-events: none;
+  }
+
+  main {
+    position: relative;
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 28px 24px 24px;
+    text-align: center;
+  }
+
+  .lock {
+    width: 46px;
+    height: 46px;
+    margin: 0 auto 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 13px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--accent);
+  }
+  .lock svg { width: 21px; height: 21px; }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 1.32rem;
+    letter-spacing: -0.015em;
+    font-weight: 650;
+  }
+
+  .lede { margin: 0; color: var(--muted); font-size: .92rem; }
+
+  .paths {
+    margin: 22px 0 0;
+    padding: 0;
+    list-style: none;
+    text-align: left;
+    border-top: 1px solid var(--border);
+  }
+  .paths li {
+    padding: 15px 2px;
+    border-bottom: 1px solid var(--border);
+    font-size: .88rem;
+    color: var(--muted);
+  }
+  .paths b {
+    display: block;
+    color: var(--text);
+    font-weight: 600;
+    margin-bottom: 3px;
+    font-size: .9rem;
+  }
+  .paths kbd {
+    font: inherit;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1px 6px;
+    white-space: nowrap;
+  }
+
+  .retry {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 22px;
+    padding: 11px 18px;
+    border-radius: 11px;
+    border: 1px solid var(--border-hi);
+    background: var(--surface-2);
+    color: var(--text);
+    font: 600 .88rem/1 inherit;
+    cursor: pointer;
+    transition: transform 160ms var(--ease-out), background 160ms ease;
+  }
+  .retry:active { transform: scale(0.97); }
+  .retry svg { width: 15px; height: 15px; }
+  @media (hover: hover) and (pointer: fine) {
+    .retry:hover { background: #1b2540; }
+  }
+
+  footer {
+    margin-top: 20px;
+    color: var(--dim);
+    font-size: .76rem;
+    letter-spacing: .02em;
+  }
+
+  /* Seen rarely, so a soft entrance is affordable. Opacity and transform
+     only, and gone entirely when the viewer asked for less motion. */
+  .card {
+    animation: rise 280ms var(--ease-out) both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card { animation: none; }
+    .retry { transition: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="lock" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" />
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </svg>
+    </div>
+
+    <h1>This project is private</h1>
+    <p class="lede">
+      It is running on someone's computer, and this link does not carry
+      permission to see it.
+    </p>
+
+    <ul class="paths">
+      <li>
+        <b>If it is yours</b>
+        Open the project in DevDeck and press <kbd>Preview</kbd>. That link
+        carries its own permission, so it works anywhere without making the
+        project public.
+      </li>
+      <li>
+        <b>If someone sent you this</b>
+        Ask them for a fresh link, or to set the project's visibility to
+        <kbd>Anyone with the link</kbd>.
+      </li>
+    </ul>
+
+    <button class="retry" type="button" onclick="location.reload()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
+      </svg>
+      Try again
+    </button>
+
+    <footer>DevDeck</footer>
+  </div>
+</main>
+</body>
+</html>

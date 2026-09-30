@@ -443,12 +443,21 @@ $('prev-reload').addEventListener('click', function () {
   this.firstElementChild.classList.add('spin');
   setTimeout(() => this.firstElementChild.classList.remove('spin'), 600);
 });
+/* The key in the preview's own address is what lets *you* see a private
+   project without publishing it. A copied link is for someone else, so it goes
+   without one and the project's visibility decides whether it opens - which is
+   the entire point of having a visibility setting. */
+function shareableUrl(url) {
+  return String(url).replace(/[?&]dd_key=[^&]*/g, '').replace(/\?$/, '');
+}
+
 $('prev-share').addEventListener('click', async function () {
+  const url = shareableUrl($('prev-url').textContent);
   try {
-    await navigator.clipboard.writeText($('prev-url').textContent);
+    await navigator.clipboard.writeText(url);
     this.setAttribute('aria-label', 'Copied');
     setTimeout(() => this.setAttribute('aria-label', 'Copy link'), 1200);
-  } catch (e) { alert($('prev-url').textContent); }
+  } catch (e) { alert(url); }
 });
 
 /* --------------------------------------------------------------------- logs */

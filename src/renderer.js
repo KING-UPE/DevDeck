@@ -1834,17 +1834,26 @@ projectTypeFilter.addEventListener('change', renderProjects);
             return;
         }
 
-        // Prefer the address that works off this network.
-        $('share-link').value = tunnelUrl
-            ? tunnelUrl.replace(/\/$/, '') + '/p/' + row.port
-            : row.url;
+        // The LAN address until the public one is ready, so the field is never
+        // empty while a tunnel is being assigned.
+        $('share-link').value = row.url;
+        hint.textContent = 'Opening a public address…';
 
-        if (current === 'public' && !tunnelUrl) {
-            hint.textContent = 'Anyone with this link can open it, but only on this Wi-Fi. Turn on "Use anywhere" in Settings to share beyond it.';
-        } else if (current === 'public') {
+        try {
+            // Asks the backend rather than assembling a URL here: only it knows
+            // the project's own tunnel, and only it can mint the key that makes
+            // a private project openable without publishing it.
+            $('share-link').value = await invoke('gateway_share_link', { key: row.key });
+        } catch (e) {
+            $('share-link').value = row.url;
+            hint.textContent = 'Only reachable on this Wi-Fi: ' + String(e);
+            return;
+        }
+
+        if (current === 'public') {
             hint.textContent = 'Anyone with this link can open it in a browser. No DevDeck app and no sign-in needed.';
         } else {
-            hint.textContent = 'Only you. Whoever opens this must sign in with your account.';
+            hint.textContent = 'Only you. Anyone else opening this link is told the project is private — switch to "Anyone with the link" to let them in.';
         }
     }
 

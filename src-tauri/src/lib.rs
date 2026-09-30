@@ -748,7 +748,31 @@ async fn tunnel_share_project(state: State<'_, AppState>, preview_port: u16) -> 
     open_tunnel(state.tunnels.clone(), preview_port).await
 }
 
-/// Shared body for the two commands above.
+/// A shareable address for one running project.
+///
+/// The desktop used to build this itself as `<gateway tunnel>/p/<port>`, a path
+/// that has never existed - one listener per project is the whole design, and
+/// the prefix approach was rejected because it breaks absolute asset URLs.
+/// Every link copied from the desktop was a 404.
+///
+/// Deliberately carries no preview key. A copied link is for other people, so
+/// whether it opens is the project's visibility setting to decide - otherwise
+/// "Only me" would mean nothing.
+#[tauri::command]
+async fn gateway_share_link(state: State<'_, AppState>, key: String) -> Result<String, String> {
+    let port = {
+        let guard = state.gateway.lock().unwrap();
+        let gw = guard.as_ref().ok_or("Sharing is off")?;
+        gw.preview_list()
+            .into_iter()
+            .find(|(k, _, _)| *k == key)
+            .map(|(_, port, _)| port)
+            .ok_or("That project is not running")?
+    };
+    open_tunnel(state.tunnels.clone(), port).await
+}
+
+/// Shared body for the tunnel commands above.
 ///
 /// Opening a tunnel blocks for up to 45s waiting on Cloudflare, so it runs on
 /// the blocking pool rather than stalling the UI thread.
@@ -2088,7 +2112,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, gateway_previews, save_scanned_projects, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, cloud_reset_password, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
+            scan_projects, get_node_processes, kill_process, run_script, get_detected_ports, gateway_start, gateway_stop, gateway_status, gateway_pair_qr, gateway_previews, save_scanned_projects, tunnel_available, tunnel_install, tunnel_start, tunnel_share_project, gateway_share_link, tunnel_stop, tunnel_status, auth_status, auth_set_account, auth_revoke_sessions, project_visibility, set_project_visibility, db_load_state, db_save_state, db_is_migrated, db_import_legacy, rendezvous_identity, rendezvous_reset, rendezvous_set_service, cloud_status, cloud_set_config, cloud_sign_up, cloud_sign_in, cloud_sign_out, cloud_devices, cloud_reset_password, run_custom_command, stop_script, open_external_url, select_directory, write_to_stdin, open_external_terminal, open_in_editor, check_system_dependency, auto_install_dependency, auto_setup_database, log_error
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
