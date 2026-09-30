@@ -9,6 +9,17 @@ edition = "2021"
 name = "devdeck_remote_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# A debug build keeps a full symbol table for every architecture it targets,
+# which took the first APK past 400 MB for an app whose Rust side does nothing.
+# Nothing on a phone reads these symbols.
+[profile.dev]
+strip = "debuginfo"
+
+[profile.release]
+strip = true
+opt-level = "s"
+lto = true
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

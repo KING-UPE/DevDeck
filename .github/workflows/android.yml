@@ -73,6 +73,10 @@ jobs:
         working-directory: mobile
         run: npx tauri android init
 
+      # Only the two ARM targets are built. `i686` and `x86_64` exist for
+      # emulators, and including all four put ~110 MB of native library each
+      # into a single APK.
+      #
       # A keystore turns this into a properly signed release build. Without one
       # the job still produces an installable debug-signed APK, so a fork can
       # build without holding any secrets.
@@ -103,12 +107,12 @@ jobs:
           storeFile=$RUNNER_TEMP/release.jks
           storePassword=$ANDROID_KEYSTORE_PASSWORD
           EOF
-          npx tauri android build --apk
+          npx tauri android build --apk --target aarch64 armv7
 
       - name: Build debug APK
         if: steps.keystore.outputs.have_keystore == 'false'
         working-directory: mobile
-        run: npx tauri android build --apk --debug
+        run: npx tauri android build --apk --debug --target aarch64 armv7
 
       - name: Collect the APK
         id: collect
