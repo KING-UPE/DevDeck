@@ -56,25 +56,40 @@ Run anyway.**
 
 ## 2. Sign in · 2 min
 
-Your cloud account **exists and is confirmed** — the confirmation link worked,
-it just redirected to a dead `localhost:3000` page, which looks like a failure
-but wasn't. The password is what does not match.
+**First, turn email confirmation off**, or nothing here will work. Supabase's
+built-in mailer allows two emails per hour for the entire project, and that
+quota is spent — which is why both signing up and resetting the password
+return "too many attempts".
 
-1. Click the **account chip** at the top of the sidebar
-2. **Forgot password?** → reset via email
-3. Sign in
+**Authentication → Sign In / Providers → Email → _Confirm email_ → off.**
 
-Do **not** use *Create account*. It will now correctly tell you the address is
-already registered — that message was wrong until recently, when it would claim
-a brand new account had been created.
+No emails are sent after that, so there is nothing left to rate limit. Then
+either:
+
+- **Create a fresh account** in DevDeck. It completes immediately and signs you
+  straight in.
+- **Or reuse the existing account**, whose password is what does not match. Set
+  it directly in the Supabase **SQL Editor**, which needs no email:
+
+  ```sql
+  update auth.users
+  set encrypted_password = crypt('a-new-password', gen_salt('bf'))
+  where email = 'the-account-address';
+  ```
 
 **Expect:** the chip changes from "Sign in" to your name with a letter avatar.
+
+The account you already had **is confirmed** — the original confirmation link
+worked, it just redirected to a dead `localhost:3000` page, which looks like a
+failure but wasn't.
 
 ---
 
 ## 3. Add the Supabase redirect URL · 1 min
 
-So future confirmation emails don't land on a dead page.
+Only matters once confirmation emails are switched back on, but it costs a
+minute now and is easy to forget later. It stops those emails landing on a dead
+page.
 
 Supabase dashboard → **Authentication → URL Configuration → Redirect URLs** →
 add:
@@ -177,6 +192,7 @@ Now that the APK exists, in rough order of likelihood:
 | | |
 | --- | --- |
 | Release uploads refused in CI | `POST /releases` returns *Resource not accessible by integration* even though the job log shows `Contents: write` granted. No rulesets, no tag protection, not a fork, and the same workflow published v1.0.21. **Unexplained.** Worked around: the installers now also upload as build artifacts, which need no release permission, and v1.1.0's assets were attached by hand. |
+| Two emails per hour, project-wide | Supabase's built-in mailer is a development service, and the cap is for the whole project rather than per person. With confirmation on, the third stranger to sign up in an hour cannot finish. Confirmation is off for now; custom SMTP is required before anyone else uses this. See [cloud/README.md](cloud/README.md). |
 | Unsigned APK | Installs fine, but Android warns, and each CI build is signed with a throwaway debug key, so an upgrade needs an uninstall first. Add `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` and `ANDROID_KEYSTORE_PASSWORD` as repo secrets and CI signs it properly. |
 | macOS is Apple Silicon only | The workflow builds `macos-latest` with no explicit target. The site no longer claims otherwise. Making it universal is a workflow change — two Rust targets and `--target universal-apple-darwin` — at roughly double the macOS build time. |
 | `startWorkspaceWizard is not defined` | **Pre-existing**, not from this work — confirmed against the original v1.0.21. Fires after a scan finds new projects. Say the word and I'll fix it. |

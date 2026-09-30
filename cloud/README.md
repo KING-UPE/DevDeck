@@ -87,6 +87,48 @@ claims to belong to someone else.
 install writes one row per machine and updates it when a tunnel starts, so the
 database size is measured in kilobytes.
 
+## Confirmation emails — read this before anyone else signs up
+
+Supabase's built-in mail service sends **two emails per hour for the whole
+project**. Not two per person: two in total. Supabase says plainly that it is
+for development, not production.
+
+With email confirmation switched on, that cap is a wall. The third person to
+sign up in an hour gets a rate-limit error, no email arrives, and there is no
+way for them to finish — the account exists but cannot sign in. It is also easy
+to hit by accident while testing, because every retry of a signup or a password
+reset spends one of the two.
+
+### While it is only you
+
+Turn confirmation off:
+
+**Authentication → Sign In / Providers → Email → _Confirm email_ → off.**
+
+Signup then completes immediately, sends nothing, and cannot be rate limited.
+DevDeck notices the account is usable straight away and signs you in rather
+than asking for the password a second time.
+
+### Before other people use it
+
+Configure custom SMTP — **Authentication → Emails → SMTP Settings** — and then
+turn confirmation back on. Two workable options:
+
+| | |
+| --- | --- |
+| **Resend** | 3,000/month free. Needs a domain you control: three DNS records (DKIM, SPF, and an MX for bounces). Best deliverability, because confirmation mail is signed. |
+| **Brevo** | 300/day free. A single sender address is verified by email, with no DNS at all. Quicker, but unsigned mail frequently lands in spam — and a confirmation link in a spam folder means people simply never finish signing up. |
+
+Whichever you use, add the confirmation page to
+**Authentication → URL Configuration → Redirect URLs**:
+
+```
+https://king-upe.github.io/DevDeck/confirmed.html
+```
+
+Without it the link in the email redirects to `localhost:3000`, which looks
+exactly like a failure even though the account was confirmed correctly.
+
 ## Optional
 
 Cloud accounts are entirely optional. With no project configured, DevDeck works
