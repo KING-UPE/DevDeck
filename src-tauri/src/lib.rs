@@ -961,7 +961,12 @@ fn cloud_status(state: State<AppState>) -> CloudStatus {
     let session = state.cloud_session.lock().unwrap();
     CloudStatus {
         configured: cloud::is_configured(&db),
-        signed_in: cloud::owner(&db).is_some(),
+        // An owner id alone is not a sign-in. Upgrading from a build that kept
+        // tokens in memory leaves exactly that: a machine claimed by an account
+        // it can no longer act for, showing a signed-in chip while quietly
+        // failing to publish its address. Say signed out, so there is something
+        // to do about it.
+        signed_in: session.is_some() || cloud::stored_refresh(&db).is_some(),
         // Falls back to the remembered address, so the chip names the account
         // from the first frame rather than after a round trip - and says
         // something truthful even if that round trip never finishes.
@@ -1021,6 +1026,27 @@ async fn cloud_sign_in(
     }
     let email = session.email.clone();
     *state.cloud_session.lock().unwrap() = Some(session);
+
+    // The account records where this machine is, and that only happened when a
+    // tunnel was started. Signing in afterwards - which is what every upgrade
+    // from a build that could not remember a session requires - left the
+    // account pointing at an address from a previous run, so the phone listed
+    // the computer and then could not reach it.
+    let existing = {
+        let port = state
+            .gateway
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|gw| gw.info().control_port);
+        port.and_then(|p| state.tunnels.lock().unwrap().existing(p))
+    };
+    if let Some(url) = existing {
+        if let Err(e) = publish_to_cloud(&state, &url).await {
+            eprintln!("[devdeck] signed in, but could not register this machine: {e}");
+        }
+    }
+
     Ok(email)
 }
 

@@ -139,6 +139,11 @@ impl TunnelManager {
     /// Blocks until Cloudflare reports the hostname, because a URL that is not
     /// yet routable is worse than a spinner: the user would scan a QR that
     /// 404s.
+    /// The hostname already serving `port`, without opening one.
+    pub fn existing(&self, port: u16) -> Option<String> {
+        self.active.get(&port).map(|t| t.url.clone())
+    }
+
     pub fn open(&mut self, port: u16) -> Result<String, String> {
         if let Some(t) = self.active.get(&port) {
             return Ok(t.url.clone());
