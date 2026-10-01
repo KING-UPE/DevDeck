@@ -54,6 +54,17 @@ pub const CONFIRM_REDIRECT: &str = "https://king-upe.github.io/DevDeck/confirmed
 const SETTING_URL: &str = "cloud_url";
 const SETTING_KEY: &str = "cloud_anon_key";
 const SETTING_OWNER: &str = "cloud_owner_id";
+/// The refresh token, so a sign-in outlives the process.
+///
+/// Access tokens expire in an hour and were held only in memory, which meant
+/// every restart silently signed the machine out while the owner id stayed
+/// behind - the app said "signed in" and had no token to prove it. This is
+/// stored in the same local database as the account's password hash, and is
+/// worth exactly what access to that file is worth.
+const SETTING_REFRESH: &str = "cloud_refresh_token";
+/// The signed-in address, so the account chip can name the account before
+/// the network has been asked anything.
+const SETTING_EMAIL: &str = "cloud_email";
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -126,7 +137,47 @@ pub fn set_owner(db: &Db, user_id: &str) -> Result<(), String> {
 }
 
 pub fn clear_owner(db: &Db) -> Result<(), String> {
+    db.set_setting(SETTING_REFRESH, "")?;
+    db.set_setting(SETTING_EMAIL, "")?;
     db.set_setting(SETTING_OWNER, "")
+}
+
+pub fn save_refresh(db: &Db, token: &str) -> Result<(), String> {
+    db.set_setting(SETTING_REFRESH, token)
+}
+
+pub fn save_email(db: &Db, email: &str) -> Result<(), String> {
+    db.set_setting(SETTING_EMAIL, email)
+}
+
+pub fn stored_email(db: &Db) -> Option<String> {
+    db.setting(SETTING_EMAIL).filter(|s| !s.is_empty())
+}
+
+pub fn stored_refresh(db: &Db) -> Option<String> {
+    db.setting(SETTING_REFRESH).filter(|s| !s.is_empty())
+}
+
+/// Trade a stored refresh token for a working session.
+///
+/// Supabase rotates the refresh token on every use, so the one that comes back
+/// must replace the one that was sent or the next restart signs out again.
+pub fn refresh(cfg: &CloudConfig, refresh_token: &str) -> Result<CloudSession, String> {
+    let mut res = agent()
+        .post(&format!(
+            "{}/auth/v1/token?grant_type=refresh_token",
+            cfg.url
+        ))
+        .header("apikey", &cfg.anon_key)
+        .header("Content-Type", "application/json")
+        .send_json(serde_json::json!({ "refresh_token": refresh_token }))
+        .map_err(|e| format!("Could not reach the cloud service: {e}"))?;
+
+    let (status, text) = read_body(&mut res);
+    if !ok(status) {
+        return Err(friendly_error(status, &text));
+    }
+    parse_session(&serde_json::from_str(&text).map_err(|e| e.to_string())?)
 }
 
 fn agent() -> ureq::Agent {
@@ -433,6 +484,37 @@ mod tests {
 
     fn db() -> Db {
         Db::open_in_memory().unwrap()
+    }
+
+    /// A sign-in has to outlive the process. It did not: the owner id was
+    /// written to disk while the tokens stayed in memory, so the next launch
+    /// claimed to be signed in with nothing to prove it and no name to show.
+    #[test]
+    fn a_sign_in_survives_a_restart() {
+        let d = db();
+        set_owner(&d, "user-uuid-1").unwrap();
+        save_refresh(&d, "refresh-abc").unwrap();
+        save_email(&d, "someone@example.com").unwrap();
+
+        // What a fresh process sees.
+        assert_eq!(owner(&d).as_deref(), Some("user-uuid-1"));
+        assert_eq!(stored_refresh(&d).as_deref(), Some("refresh-abc"));
+        assert_eq!(stored_email(&d).as_deref(), Some("someone@example.com"));
+    }
+
+    /// Signing out must not leave a usable token behind.
+    #[test]
+    fn signing_out_clears_every_trace() {
+        let d = db();
+        set_owner(&d, "user-uuid-1").unwrap();
+        save_refresh(&d, "refresh-abc").unwrap();
+        save_email(&d, "someone@example.com").unwrap();
+
+        clear_owner(&d).unwrap();
+
+        assert_eq!(owner(&d), None, "still claimed by an account");
+        assert_eq!(stored_refresh(&d), None, "a refresh token was left on disk");
+        assert_eq!(stored_email(&d), None, "the address was left behind");
     }
 
     #[test]

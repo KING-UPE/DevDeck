@@ -962,7 +962,13 @@ fn cloud_status(state: State<AppState>) -> CloudStatus {
     CloudStatus {
         configured: cloud::is_configured(&db),
         signed_in: cloud::owner(&db).is_some(),
-        email: session.as_ref().map(|s: &cloud::CloudSession| s.email.clone()),
+        // Falls back to the remembered address, so the chip names the account
+        // from the first frame rather than after a round trip - and says
+        // something truthful even if that round trip never finishes.
+        email: session
+            .as_ref()
+            .map(|s: &cloud::CloudSession| s.email.clone())
+            .or_else(|| cloud::stored_email(&db)),
     }
 }
 
@@ -1006,7 +1012,13 @@ async fn cloud_sign_in(
 
     // The machine now belongs to this account; the gateway checks presented
     // tokens against it before minting a local session.
-    cloud::set_owner(&state.db.lock().unwrap(), &session.user_id)?;
+    {
+        let db = state.db.lock().unwrap();
+        cloud::set_owner(&db, &session.user_id)?;
+        // Without these the sign-in lasts only as long as the process.
+        cloud::save_refresh(&db, &session.refresh_token)?;
+        cloud::save_email(&db, &session.email)?;
+    }
     let email = session.email.clone();
     *state.cloud_session.lock().unwrap() = Some(session);
     Ok(email)
@@ -2046,6 +2058,41 @@ pub fn run() {
             cloud_session: Arc::new(Mutex::new(None)),
         })
         .setup(|app| {
+            // Put the signed-in account back, off the startup path: it is a
+            // network round trip, and the window should not wait on it. Until
+            // it lands the account chip simply shows nothing new.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<AppState>();
+                    let Some((cfg, token)) = ({
+                        let db = state.db.lock().unwrap();
+                        cloud::config(&db).zip(cloud::stored_refresh(&db))
+                    }) else {
+                        return;
+                    };
+                    match cloud::refresh(&cfg, &token) {
+                        Ok(session) => {
+                            let db = state.db.lock().unwrap();
+                            // Rotated on every use, so the new one has to replace it.
+                            let _ = cloud::save_refresh(&db, &session.refresh_token);
+                            let _ = cloud::save_email(&db, &session.email);
+                            let _ = cloud::set_owner(&db, &session.user_id);
+                            drop(db);
+                            *state.cloud_session.lock().unwrap() = Some(session);
+                        }
+                        Err(e) => {
+                            // A refused token means the account really is signed
+                            // out - leaving the owner id behind would keep the UI
+                            // claiming otherwise forever.
+                            eprintln!("[devdeck] stored sign-in could not be restored: {e}");
+                            let db = state.db.lock().unwrap();
+                            let _ = cloud::clear_owner(&db);
+                        }
+                    }
+                });
+            }
+
             let _tray = tauri::tray::TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
                 .show_menu_on_left_click(true)
