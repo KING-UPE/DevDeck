@@ -245,9 +245,22 @@ async function openDevice(d) {
       catch (err) { e = err; }
     }
     $('dev-sub').textContent = 'not connected';
+    // "Failed to fetch" is what a browser says for every network failure, and
+    // it tells nobody anything. The address a computer registers is a quick
+    // tunnel, which gets a new hostname every run, so the overwhelmingly
+    // likely cause is that the recorded one has been replaced.
+    const network = /failed to fetch|networkerror|load failed/i.test(e.message || '');
     $('projects').innerHTML =
       '<div class="empty"><strong>Could not reach that computer</strong><p>' +
-      esc(e.message) + '</p></div>';
+      (network
+        ? 'Its address has probably changed. On that computer open DevDeck, ' +
+          'go to <strong>Settings &rarr; Link a device</strong>, and turn ' +
+          '<strong>Use anywhere</strong> off and then on &mdash; that publishes ' +
+          'the new address.<br><br>If it still fails, the phone may not be able ' +
+          'to resolve <code>trycloudflare.com</code> on mobile data. Setting ' +
+          '<strong>Private DNS</strong> to <code>one.one.one.one</code> fixes that.'
+        : esc(e.message)) +
+      '</p></div>';
   }
 }
 

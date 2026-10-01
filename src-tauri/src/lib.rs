@@ -816,16 +816,46 @@ fn hostname() -> String {
 }
 
 #[tauri::command]
-fn tunnel_stop(state: State<AppState>, port: Option<u16>) -> Result<(), String> {
+async fn tunnel_stop(state: State<'_, AppState>, port: Option<u16>) -> Result<(), String> {
     // Stop advertising before the hostname dies, so a phone is not sent to a
     // tunnel that no longer answers.
     let _ = rendezvous::withdraw(&state.db.lock().unwrap());
-    let mut mgr = state.tunnels.lock().unwrap();
-    match port {
-        Some(p) => mgr.close(p),
-        None => mgr.close_all(),
+    {
+        let mut mgr = state.tunnels.lock().unwrap();
+        match port {
+            Some(p) => mgr.close(p),
+            None => mgr.close_all(),
+        }
+    }
+    if let Err(e) = clear_cloud_address(&state).await {
+        eprintln!("[devdeck] tunnel stopped but the account still points at it: {e}");
     }
     Ok(())
+}
+
+/// Forget this machine's address in the account.
+///
+/// A quick tunnel gets a new hostname every run, and the phone treats "a URL
+/// was recorded" as "this computer is online". Leaving a dead hostname behind
+/// is what makes it show a computer as online and then fail to reach it.
+async fn clear_cloud_address(state: &State<'_, AppState>) -> Result<(), String> {
+    let (cfg, token, user_id) = {
+        let db = state.db.lock().unwrap();
+        let Some(cfg) = cloud::config(&db) else {
+            return Ok(());
+        };
+        let guard = state.cloud_session.lock().unwrap();
+        let Some(session) = guard.as_ref() else {
+            return Ok(());
+        };
+        (cfg, session.access_token.clone(), session.user_id.clone())
+    };
+    let name = hostname();
+    tauri::async_runtime::spawn_blocking(move || {
+        cloud::upsert_device(&cfg, &token, &user_id, &name, None)
+    })
+    .await
+    .map_err(|e| format!("device update failed: {e}"))?
 }
 
 /// Every live tunnel, as a local-port to public-URL map.
